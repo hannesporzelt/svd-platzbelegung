@@ -1,7 +1,7 @@
 # SV Dörfleins – Platzbelegung
 
 Web-App zur Platzbelegung mit Wochenansicht, Fußballfeld-Visualisierung,
-Trainerwünschen und Admin-Verwaltung. Frontend: React + Vite. Backend:
+Trainerwünschen und Platzwart-Verwaltung. Frontend: React + Vite. Backend:
 Firebase (Firestore + Auth). Hosting: Netlify.
 
 Alle Daten (Belegungen, Wünsche, Trainingstage, Sperren) liegen in Firestore
@@ -20,9 +20,9 @@ und werden in Echtzeit auf allen Geräten synchron gehalten.
 - Fußballfeld-Visualisierung für Platz 1/2/3 mit eingetragenen Mannschaften
 - Trainer (ohne Login): Trainingstage melden und Wünsche äußern; Konflikte
   werden sofort angezeigt
-- Admin (Passwort): Belegungen, Heimspiele, Sperren eintragen, Wünsche
+- Platzwart (Passwort): Belegungen, Heimspiele, Sperren eintragen, Wünsche
   annehmen/ablehnen, Trainingstage löschen
-- Doppelbelegungs-Warnung überall + Hinweiszähler für den Admin
+- Doppelbelegungs-Warnung überall + Hinweiszähler für den Platzwart
 
 ---
 
@@ -99,14 +99,14 @@ Die Umgebungsvariablen vorher in `.env` setzen oder im Netlify-Dashboard.
 
 ---
 
-## 5. Admin-Zugang
+## 5. Platzwart-Zugang
 
-Oben rechts auf **Admin** klicken → Passwort eingeben. Das Passwort steht in
-`VITE_ADMIN_PASSWORD` (Standard `1901`, unbedingt ändern). Der Admin bleibt
-für die Browser-Sitzung angemeldet; **Admin abmelden** beendet sie.
+Oben rechts auf **Platzwart** klicken → Passwort eingeben. Das Passwort steht in
+`VITE_ADMIN_PASSWORD` (Standard `1901`, unbedingt ändern). Der Platzwart bleibt
+für die Browser-Sitzung angemeldet; **Platzwart abmelden** beendet sie.
 
-Der Admin sieht oben einen Hinweis, wenn es in der aktuellen Woche
-Doppelbelegungen oder offene Trainerwünsche gibt; der Zähler am Admin-Knopf
+Der Platzwart sieht oben einen Hinweis, wenn es in der aktuellen Woche
+Doppelbelegungen oder offene Trainerwünsche gibt; der Zähler am Platzwart-Knopf
 zeigt die Gesamtzahl.
 
 ---
@@ -118,7 +118,7 @@ Schutz auf Datenebene – technisch könnte ein angemeldeter Nutzer die
 Firestore-Schreib-API direkt ansprechen. Für echten Schutz:
 
 1. In Firebase Auth ein **E-Mail/Passwort-Konto** für den Platzwart anlegen.
-2. Diesem Konto per Admin-SDK einen **Custom Claim** `admin: true` geben
+2. Diesem Konto per Platzwart-SDK einen **Custom Claim** `admin: true` geben
    (kleines Node-Skript mit `firebase-admin`, Beispiel auf Anfrage).
 3. In `firestore.rules` auf **Stufe B** umstellen (die mit `/* B */`
    markierten Zeilen aktivieren, die Stufe-A-Zeilen entfernen).
@@ -147,7 +147,7 @@ svd-app/
    │  └─ Pitch.jsx       SVG-Fußballfeld
    └─ lib/
       ├─ firebase.js     Firebase-Init
-      ├─ auth.js         Anonyme Anmeldung + Admin-Passwort
+      ├─ auth.js         Anonyme Anmeldung + Platzwart-Passwort
       ├─ data.js         Firestore-Echtzeit-Hooks
       ├─ domain.js       Teams, Plätze, Datumslogik, Konflikterkennung
       └─ styles.js       Farb- und Style-Tokens

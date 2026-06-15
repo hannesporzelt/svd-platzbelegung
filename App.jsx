@@ -5,7 +5,7 @@ import {
   autoTrainingForDay, findConflicts, conflictIdsForEntries,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
-import { useBookings, useWishes, useTrainingDays, useLocks } from "./lib/data";
+import { useBookings, useWishes, useTrainingDays, useLocks, useMessages } from "./lib/data";
 import { C, S } from "./lib/styles";
 import Pitch from "./components/Pitch";
 
@@ -15,6 +15,7 @@ export default function App() {
   const { wishes, wishesReady, addWish, setWishStatus } = useWishes();
   const { trainDays, trainDaysReady, saveTrainDay, setTrainDayStatus, removeTrainDay } = useTrainingDays();
   const { locks, locksReady, addLock, removeLock } = useLocks();
+  const { messages, messagesReady, addMessage, setMessageDone, removeMessage } = useMessages();
 
   const [view, setView] = useState("viewer"); // viewer | trainer | admin
   const [trainerTeam, setTrainerTeam] = useState("u15");
@@ -50,6 +51,7 @@ export default function App() {
 
   // Admin-Hinweise: offene Wünsche + Konflikte in der aktuellen Woche
   const openWishCount = wishes.filter((w) => w.status === "offen").length;
+  const openMsgCount = messages.filter((m) => !m.done).length;
   const weekConflictCount = useMemo(() => {
     let n = 0;
     days.forEach((d) => {
@@ -61,13 +63,13 @@ export default function App() {
 
   const requestAdmin = () => {
     if (isAdmin) { setView("admin"); return; }
-    const pw = window.prompt("Admin-Zugang – bitte Passwort eingeben:");
+    const pw = window.prompt("Platzwart-Zugang – bitte Passwort eingeben:");
     if (pw === null) return;
     if (loginAdmin(pw)) setView("admin");
     else window.alert("Falsches Passwort. Zugang verweigert.");
   };
 
-  const ready = bookingsReady && wishesReady && locksReady && trainDaysReady;
+  const ready = bookingsReady && wishesReady && locksReady && trainDaysReady && messagesReady;
   if (!user || !ready)
     return (
       <div style={S.shell}>
@@ -86,17 +88,18 @@ export default function App() {
         logoutAdmin={() => { logoutAdmin(); setView("viewer"); }}
         trainerTeam={trainerTeam}
         setTrainerTeam={setTrainerTeam}
-        notices={openWishCount + weekConflictCount}
+        notices={openWishCount + weekConflictCount + openMsgCount}
       />
 
       <WeekNav weekStart={weekStart} setWeekStart={setWeekStart} />
 
-      {isAdmin && (openWishCount > 0 || weekConflictCount > 0) && (
+      {isAdmin && (openWishCount > 0 || weekConflictCount > 0 || openMsgCount > 0) && (
         <div style={S.warnBanner}>
-          ⚠️ Hinweis für Admin:
+          ⚠️ Hinweis für Platzwart:
           {weekConflictCount > 0 && ` ${weekConflictCount} Belegung(en) mit Konflikt in dieser Woche.`}
           {openWishCount > 0 && ` ${openWishCount} offene(r) Trainerwunsch/-wünsche.`}
-          {" "}Bitte im Admin-Bereich prüfen.
+          {openMsgCount > 0 && ` ${openMsgCount} neue Nachricht(en) von Trainern.`}
+          {" "}Bitte im Platzwart-Bereich prüfen.
         </div>
       )}
 
@@ -135,6 +138,9 @@ export default function App() {
           trainDays={trainDays}
           setTrainDayStatus={setTrainDayStatus}
           removeTrainDay={removeTrainDay}
+          messages={messages}
+          setMessageDone={setMessageDone}
+          removeMessage={removeMessage}
         />
       )}
 
@@ -146,13 +152,15 @@ export default function App() {
           trainDays={trainDays}
           saveTrainDay={saveTrainDay}
           entriesForDay={entriesForDay}
+          addMessage={addMessage}
+          messages={messages}
         />
       )}
 
       {view === "viewer" && (
         <div style={{ ...S.card, marginTop: "1rem", color: C.textSec, fontSize: 14 }}>
           Lesemodus. Trainer können ohne Anmeldung Trainingstage melden und Wünsche äußern;
-          Konflikte werden dabei sofort angezeigt. Der Admin pflegt Belegungen, Heimspiele und
+          Konflikte werden dabei sofort angezeigt. Der Platzwart pflegt Belegungen, Heimspiele und
           Sperren und löst gemeldete Konflikte.
         </div>
       )}
@@ -180,7 +188,7 @@ function Header({ view, setView, isAdmin, logoutAdmin, trainerTeam, setTrainerTe
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <div style={S.roleSwitch}>
-          {[["viewer", "Betrachter"], ["trainer", "Trainer"], ["admin", "Admin"]].map(([k, label]) => (
+          {[["viewer", "Betrachter"], ["trainer", "Trainer"], ["admin", "Platzwart"]].map(([k, label]) => (
             <button key={k} onClick={() => setView(k)} style={{ ...S.roleBtn, ...(view === k ? S.roleBtnActive : {}) }}>
               {label}
               {k === "admin" && isAdmin && notices > 0 && <span style={S.badge}>{notices}</span>}
@@ -193,7 +201,7 @@ function Header({ view, setView, isAdmin, logoutAdmin, trainerTeam, setTrainerTe
           </select>
         )}
         {isAdmin && (
-          <button style={S.navBtn} onClick={logoutAdmin}>Admin abmelden</button>
+          <button style={S.navBtn} onClick={logoutAdmin}>Platzwart abmelden</button>
         )}
       </div>
     </header>
@@ -347,27 +355,32 @@ function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockFor
 }
 
 /* ---------------- Admin ---------------- */
-function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, removeBooking, removeSeries, wishes, setWishStatus, locks, addLock, removeLock, trainDays, setTrainDayStatus, removeTrainDay }) {
+function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, removeBooking, removeSeries, wishes, setWishStatus, locks, addLock, removeLock, trainDays, setTrainDayStatus, removeTrainDay, messages, setMessageDone, removeMessage }) {
   const [tab, setTab] = useState("belegung");
   const open = wishes.filter((w) => w.status === "offen").length;
+  const openMsg = messages.filter((m) => !m.done).length;
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
       <div style={S.adminTabs}>
         {[
           ["belegung", "Belegung eintragen"],
           ["spiel", "Heimspiel"],
+          ["verwalten", "Belegungen verwalten"],
           ["sperre", "Platzsperre"],
           ["trainingstage", "Trainingstage"],
           ["wuensche", `Wünsche${open ? ` (${open})` : ""}`],
+          ["nachrichten", `Nachrichten${openMsg ? ` (${openMsg})` : ""}`],
         ].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...S.tab, ...(tab === k ? S.tabActive : {}) }}>{l}</button>
         ))}
       </div>
       {tab === "belegung" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="training" />}
       {tab === "spiel" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="match" />}
+      {tab === "verwalten" && <BookingManager bookings={bookings} removeBooking={removeBooking} removeSeries={removeSeries} />}
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDaysAdmin trainDays={trainDays} setTrainDayStatus={setTrainDayStatus} removeTrainDay={removeTrainDay} />}
       {tab === "wuensche" && <WishInbox wishes={wishes} setWishStatus={setWishStatus} addBooking={addBooking} addBookingSeries={addBookingSeries} bookingsByDay={bookingsByDay} />}
+      {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} />}
     </div>
   );
 }
@@ -378,6 +391,96 @@ function Field({ label, children }) {
       <span style={{ fontSize: 12, color: C.textSec }}>{label}</span>
       {children}
     </label>
+  );
+}
+
+// Lesbare Zonen-Bezeichnung für Listen
+function zoneText(field, zone) {
+  const f = fieldById(field);
+  const z = f?.zones.find((x) => x.id === zone);
+  return z ? z.label : zone;
+}
+
+// Platzwart: alle Belegungen, filterbar nach Mannschaft, einzeln oder als Serie löschbar
+function BookingManager({ bookings, removeBooking, removeSeries }) {
+  const [team, setTeam] = useState("alle");
+  const todayKey = dayKey(new Date());
+  const list = bookings
+    .filter((b) => team === "alle" || b.team === team)
+    .filter((b) => b.date >= todayKey) // ab heute
+    .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+
+  const fmtDate = (dk) => {
+    const d = new Date(dk + "T12:00");
+    return `${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
+  };
+
+  return (
+    <div>
+      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>
+        Alle eingetragenen Belegungen ab heute. Über den Filter eine Mannschaft auswählen und einzelne Tage löschen – z. B. wenn ein Trainer einen Ausfall meldet.
+      </p>
+      <div style={{ marginBottom: 12, maxWidth: 280 }}>
+        <Field label="Mannschaft filtern">
+          <select value={team} onChange={(e) => setTeam(e.target.value)} style={S.select}>
+            <option value="alle">Alle Mannschaften</option>
+            {TEAMS.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </Field>
+      </div>
+      {list.length === 0 && <p style={{ color: C.textSec, fontSize: 14 }}>Keine Belegungen gefunden.</p>}
+      {list.map((b) => (
+        <div key={b.id} style={{ ...S.listRow, flexWrap: "wrap" }}>
+          <span style={{ flex: "1 1 260px", borderLeft: `3px solid ${teamById(b.team)?.color || C.textSec}`, paddingLeft: 8 }}>
+            <b>{teamById(b.team)?.name || b.team}</b> · {fmtDate(b.date)} · {b.start}–{b.end}
+            <div style={{ fontSize: 12, color: C.textSec }}>{fieldById(b.field)?.name} · {zoneText(b.field, b.zone)}{b.kind === "match" ? " · Heimspiel" : ""}{b.seriesId ? " · Teil einer Serie" : ""}</div>
+          </span>
+          <span style={{ display: "flex", gap: 6 }}>
+            {b.seriesId && <button style={S.delBtn} onClick={() => { if (window.confirm("Die ganze Serie löschen (alle Termine)?")) removeSeries(b.seriesId, bookings); }}>Serie löschen</button>}
+            <button style={S.delBtn} onClick={() => { if (window.confirm(`Belegung am ${fmtDate(b.date)} löschen?`)) removeBooking(b.id); }}>Diesen Tag löschen</button>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Platzwart: Nachrichten von Trainern
+function MessageInbox({ messages, setMessageDone, removeMessage }) {
+  const sorted = messages.slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  const open = sorted.filter((m) => !m.done);
+  const done = sorted.filter((m) => m.done);
+  const fmtTs = (ts) => ts ? new Date(ts).toLocaleString("de-DE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+  return (
+    <div>
+      {open.length === 0 && <p style={{ color: C.textSec, fontSize: 14 }}>Keine neuen Nachrichten.</p>}
+      {open.map((m) => (
+        <div key={m.id} style={S.wishRow}>
+          <div style={{ flex: 1 }}>
+            <b>{teamById(m.team)?.name || m.team}</b> <span style={{ fontSize: 12, color: C.textSec }}>· {fmtTs(m.ts)}</span>
+            <div style={{ fontSize: 14, marginTop: 2 }}>{m.text}</div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button style={S.okBtn} onClick={() => setMessageDone(m.id, true)}>Erledigt</button>
+            <button style={S.delBtn} onClick={() => { if (window.confirm("Nachricht löschen?")) removeMessage(m.id); }}>Löschen</button>
+          </div>
+        </div>
+      ))}
+      {done.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={S.subHead}>Erledigt</div>
+          {done.slice(0, 10).map((m) => (
+            <div key={m.id} style={{ ...S.listRow, opacity: 0.7 }}>
+              <span>{teamById(m.team)?.name} · {fmtTs(m.ts)} · {m.text}</span>
+              <span style={{ display: "flex", gap: 6 }}>
+                <button style={S.navBtn} onClick={() => setMessageDone(m.id, false)}>Zurück</button>
+                <button style={S.delBtn} onClick={() => removeMessage(m.id)}>Löschen</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -661,17 +764,59 @@ function WishInbox({ wishes, setWishStatus, addBooking, addBookingSeries, bookin
 }
 
 /* ---------------- Trainer ---------------- */
-function TrainerPanel({ trainerTeam, wishes, addWish, trainDays, saveTrainDay, entriesForDay }) {
+function TrainerPanel({ trainerTeam, wishes, addWish, trainDays, saveTrainDay, entriesForDay, addMessage, messages }) {
   const [tab, setTab] = useState("trainingstage");
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
       <div style={S.adminTabs}>
-        {[["trainingstage", "Normale Trainingstage"], ["wunsch", "Wunsch äußern"]].map(([k, l]) => (
+        {[["trainingstage", "Normale Trainingstage"], ["wunsch", "Wunsch äußern"], ["nachricht", "Nachricht an Platzwart"]].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...S.tab, ...(tab === k ? S.tabActive : {}) }}>{l}</button>
         ))}
       </div>
       {tab === "trainingstage" && <TrainDaysForm trainerTeam={trainerTeam} trainDays={trainDays} saveTrainDay={saveTrainDay} />}
       {tab === "wunsch" && <WishForm trainerTeam={trainerTeam} addWish={addWish} wishes={wishes} entriesForDay={entriesForDay} />}
+      {tab === "nachricht" && <MessageForm trainerTeam={trainerTeam} addMessage={addMessage} messages={messages} />}
+    </div>
+  );
+}
+
+function MessageForm({ trainerTeam, addMessage, messages }) {
+  const [text, setText] = useState("");
+  const [sent, setSent] = useState(false);
+  const send = () => {
+    const t = text.trim();
+    if (!t) return;
+    addMessage({ team: trainerTeam, text: t });
+    setText(""); setSent(true); setTimeout(() => setSent(false), 2000);
+  };
+  const mine = messages.filter((m) => m.team === trainerTeam).slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 5);
+  return (
+    <div>
+      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>
+        Schreib dem Platzwart eine kurze Nachricht (z. B. Ausfall, Hinweis zum Platz, Rückfrage) als <b>{teamById(trainerTeam)?.name}</b>.
+      </p>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Deine Nachricht…"
+        rows={4}
+        style={{ ...S.select, width: "100%", resize: "vertical", minHeight: 90 }}
+      />
+      <div style={{ marginTop: 10 }}>
+        <button style={{ ...S.primaryBtn, ...(text.trim() ? {} : S.btnDisabled) }} onClick={send} disabled={!text.trim()}>Nachricht senden</button>
+        {sent && <span style={{ marginLeft: 10, color: C.ok, fontSize: 13 }}>✓ gesendet</span>}
+      </div>
+      {mine.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={S.subHead}>Meine letzten Nachrichten</div>
+          {mine.map((m) => (
+            <div key={m.id} style={S.listRow}>
+              <span>{m.text}</span>
+              <span style={{ fontSize: 12, color: m.done ? C.ok : C.textSec }}>{m.done ? "✓ erledigt" : "offen"}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -686,15 +831,15 @@ function TrainDaysForm({ trainerTeam, trainDays, saveTrainDay }) {
   const toggle = (i) => setSel((s) => (s.includes(i) ? s.filter((x) => x !== i) : [...s, i].sort()));
   return (
     <div>
-      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>Melde die regelmäßigen Trainingstage für <b>{teamById(trainerTeam)?.name}</b>. Der Admin nutzt sie als Grundlage für den Jahresplan.</p>
+      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>Melde die regelmäßigen Trainingstage für <b>{teamById(trainerTeam)?.name}</b>. Der Platzwart nutzt sie als Grundlage für den Jahresplan.</p>
       {existing.status === "abgelehnt" && (
         <div style={S.warnBanner}>
-          ✕ Der Admin hat diese Trainingstage abgelehnt{existing.reason ? `: ${existing.reason}` : ""}. Du kannst sie anpassen und erneut speichern.
+          ✕ Der Platzwart hat diese Trainingstage abgelehnt{existing.reason ? `: ${existing.reason}` : ""}. Du kannst sie anpassen und erneut speichern.
         </div>
       )}
       {existing.status === "bestaetigt" && (
         <div style={{ ...S.warnBanner, background: "#e1f5ee", color: C.ok, border: "1px solid #9fd8c5" }}>
-          ✓ Diese Trainingstage wurden vom Admin bestätigt.
+          ✓ Diese Trainingstage wurden vom Platzwart bestätigt.
         </div>
       )}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
@@ -793,12 +938,12 @@ function WishForm({ trainerTeam, addWish, wishes, entriesForDay }) {
       {mode === "single" && !timeInvalid && liveConflicts.length > 0 && (
         <div style={S.warnBanner}>
           ⚠️ Achtung: {fieldById(field)?.name} ist zu dieser Zeit schon belegt durch{" "}
-          {liveConflicts.map((c) => `${teamById(c.team)?.name || c.team}${c.auto ? " (fix)" : ""}`).join(", ")}. Du kannst den Wunsch trotzdem absenden – der Admin entscheidet.
+          {liveConflicts.map((c) => `${teamById(c.team)?.name || c.team}${c.auto ? " (fix)" : ""}`).join(", ")}. Du kannst den Wunsch trotzdem absenden – der Platzwart entscheidet.
         </div>
       )}
       {mode === "series" && !timeInvalid && (
         <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>
-          Serien-Wunsch: <b>{seriesDates.length}</b> {WEEKDAYS_LONG[weekday]}-Termine. Der Admin prüft Konflikte beim Annehmen.
+          Serien-Wunsch: <b>{seriesDates.length}</b> {WEEKDAYS_LONG[weekday]}-Termine. Der Platzwart prüft Konflikte beim Annehmen.
         </div>
       )}
 

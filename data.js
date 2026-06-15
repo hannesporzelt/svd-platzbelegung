@@ -6,6 +6,7 @@
 //                 recur (optional) = { weekday, from, to } für wiederkehrende Wünsche
 //   trainingDays  gemeldete Trainingstage           docId = teamId; { days:[], start, end, field }
 //   locks         Platzsperren                      { field, from, to, reason }
+//   messages      Nachrichten Trainer -> Admin       { team, text, ts, done }
 
 import { useEffect, useState } from "react";
 import {
@@ -81,5 +82,18 @@ export function useLocks() {
     locksReady: ready,
     addLock: (l) => addDoc(collection(db, "locks"), l),
     removeLock: (id) => deleteDoc(doc(db, "locks", id)),
+  };
+}
+
+// Nachrichten von Trainern an den Admin
+//   messages   { team, text, ts, done }
+export function useMessages() {
+  const { items, ready } = useCollection("messages");
+  return {
+    messages: items,
+    messagesReady: ready,
+    addMessage: (m) => addDoc(collection(db, "messages"), { ...m, done: false, ts: Date.now() }),
+    setMessageDone: (id, done) => updateDoc(doc(db, "messages", id), { done }),
+    removeMessage: (id) => deleteDoc(doc(db, "messages", id)),
   };
 }

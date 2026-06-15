@@ -48,5 +48,11 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if signedIn();              // Trainer melden Trainingstage
     }
+
+    match /messages/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn();             // Trainer schreiben Nachrichten
+      allow update, delete: if signedIn();     // Admin hakt ab / entfernt (im Frontend)
+    }
   }
 }

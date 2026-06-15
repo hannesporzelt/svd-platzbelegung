@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Single-Page-App: alle Routen auf index.html umleiten
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[build.environment]
+  NODE_VERSION = "20"

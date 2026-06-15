@@ -25,11 +25,15 @@ export const WEEKDAYS_LONG = [
 ];
 
 // Platz 2: V1+V2 = Hälfte Oberhaid, V3+V4 = Hälfte Hallstadt
+// Wählbare Einheiten: ganzer Platz, je eine Hälfte, oder einzelne Viertel.
 export const FIELDS = [
   { id: "p1", name: "Platz 1", subtitle: "Spiele · U7-Training", zones: [{ id: "voll", label: "Ganzer Platz" }] },
   {
-    id: "p2", name: "Platz 2", subtitle: "Trainingsplatz · 4 Viertel",
+    id: "p2", name: "Platz 2", subtitle: "Trainingsplatz · ganz / Hälfte / Viertel",
     zones: [
+      { id: "p2_voll", label: "Ganzer Platz 2" },
+      { id: "h_ob", label: "Hälfte Oberhaid (V1+V2)" },
+      { id: "h_ha", label: "Hälfte Hallstadt (V3+V4)" },
       { id: "v1", label: "Viertel 1 · Oberhaid" }, { id: "v2", label: "Viertel 2 · Oberhaid" },
       { id: "v3", label: "Viertel 3 · Hallstadt" }, { id: "v4", label: "Viertel 4 · Hallstadt" },
     ],
@@ -40,6 +44,22 @@ export const FIELDS = [
   },
 ];
 export const fieldById = (id) => FIELDS.find((f) => f.id === id);
+
+// Welche "atomaren" Teilflächen belegt eine Zone? Überlappung = gemeinsame Teilfläche.
+const ZONE_UNITS = {
+  // Platz 2
+  p2_voll: ["v1", "v2", "v3", "v4"],
+  h_ob: ["v1", "v2"],
+  h_ha: ["v3", "v4"],
+  v1: ["v1"], v2: ["v2"], v3: ["v3"], v4: ["v4"],
+  // Platz 3
+  h1: ["h1"], h2: ["h2"],
+  // Platz 1
+  voll: ["voll"],
+};
+const unitsOf = (zone) => ZONE_UNITS[zone] || [zone];
+export const zoneCovers = (zone, unit) => unitsOf(zone).includes(unit);
+
 
 // ---------- Datums-Hilfen (ISO-Woche, Mo=Start) ----------
 export const dayKey = (d) => {
@@ -132,7 +152,9 @@ export const zonesOverlap = (a, b) => {
   if (a.field !== b.field) return false;
   if (a.zone === b.zone) return true;
   if (a.field === "p1") return true; // Platz 1 voll = überlappt alles
-  return false;
+  // Überlappung, wenn die belegten Teilflächen sich schneiden
+  const ua = unitsOf(a.zone), ub = unitsOf(b.zone);
+  return ua.some((u) => ub.includes(u));
 };
 
 export const findConflicts = (candidate, existing) =>

@@ -54,7 +54,8 @@ export function useWishes() {
     wishes: items,
     wishesReady: ready,
     addWish: (w) => addDoc(collection(db, "wishes"), { ...w, status: "offen" }),
-    setWishStatus: (id, status) => updateDoc(doc(db, "wishes", id), { status }),
+    // Status setzen, optional mit Grund (z. B. beim Ablehnen)
+    setWishStatus: (id, status, reason = "") => updateDoc(doc(db, "wishes", id), { status, reason }),
   };
 }
 
@@ -66,6 +67,9 @@ export function useTrainingDays() {
     trainDays: map,
     trainDaysReady: ready,
     saveTrainDay: (teamId, data) => setDoc(doc(db, "trainingDays", teamId), data),
+    // Status/Grund setzen, ohne die Meldung zu löschen (z. B. ablehnen)
+    setTrainDayStatus: (teamId, status, reason = "") =>
+      updateDoc(doc(db, "trainingDays", teamId), { status, reason }),
     removeTrainDay: (teamId) => deleteDoc(doc(db, "trainingDays", teamId)),
   };
 }

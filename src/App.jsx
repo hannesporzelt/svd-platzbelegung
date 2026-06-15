@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from "react";
 import {
   TEAMS, FIELDS, teamById, fieldById, WEEKDAYS, WEEKDAYS_LONG,
-  dayKey, mondayOf, addDays, isoWeek, fmtRange,
+  dayKey, mondayOf, addDays, isoWeek, fmtRange, expandRecurrence, zoneCovers,
   autoTrainingForDay, findConflicts, conflictIdsForEntries,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
@@ -11,9 +11,9 @@ import Pitch from "./components/Pitch";
 
 export default function App() {
   const { user, isAdmin, loginAdmin, logoutAdmin } = useAuth();
-  const { bookings, bookingsReady, addBooking, removeBooking } = useBookings();
+  const { bookings, bookingsReady, addBooking, addBookingSeries, removeBooking, removeSeries } = useBookings();
   const { wishes, wishesReady, addWish, setWishStatus } = useWishes();
-  const { trainDays, trainDaysReady, saveTrainDay, removeTrainDay } = useTrainingDays();
+  const { trainDays, trainDaysReady, saveTrainDay, setTrainDayStatus, removeTrainDay } = useTrainingDays();
   const { locks, locksReady, addLock, removeLock } = useLocks();
 
   const [view, setView] = useState("viewer"); // viewer | trainer | admin
@@ -121,15 +121,19 @@ export default function App() {
       {view === "admin" && isAdmin && (
         <AdminPanel
           days={days}
+          bookings={bookings}
           bookingsByDay={bookingsByDay}
           addBooking={addBooking}
+          addBookingSeries={addBookingSeries}
           removeBooking={removeBooking}
+          removeSeries={removeSeries}
           wishes={wishes}
           setWishStatus={setWishStatus}
           locks={locks}
           addLock={addLock}
           removeLock={removeLock}
           trainDays={trainDays}
+          setTrainDayStatus={setTrainDayStatus}
           removeTrainDay={removeTrainDay}
         />
       )}
@@ -258,7 +262,8 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
 
 function Chip({ entry, conflict }) {
   const t = teamById(entry.team);
-  const zoneLabel = entry.field === "p2" ? entry.zone.toUpperCase()
+  const P2_SHORT = { p2_voll: "ganz", h_ob: "Oberhaid", h_ha: "Hallstadt", v1: "V1", v2: "V2", v3: "V3", v4: "V4" };
+  const zoneLabel = entry.field === "p2" ? (P2_SHORT[entry.zone] || entry.zone)
     : entry.field === "p3" ? (entry.zone === "h1" ? "H1" : "H2") : "";
   return (
     <div style={{ ...S.chip, borderLeft: `3px solid ${t ? t.color : C.textSec}`, ...(conflict ? { background: "#fbeaea", borderColor: "#e7a5a5" } : {}) }}
@@ -304,7 +309,9 @@ function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockFor
   const date = days[Math.min(dayIdx, 6)] || days[0];
   const entries = entriesForDay(date).filter((e) => e.field === activeField);
   const lock = lockForDayField(date, activeField);
-  const zoneOccupants = (zoneId) => entries.filter((e) => e.zone === zoneId);
+  // Eine Teilfläche (z. B. v1) zeigt jeden Eintrag, dessen Zone sie abdeckt –
+  // also auch eine Hälften- oder Ganzplatz-Belegung.
+  const zoneOccupants = (zoneId) => entries.filter((e) => zoneCovers(e.zone, zoneId));
 
   return (
     <div style={S.card}>
@@ -340,7 +347,7 @@ function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockFor
 }
 
 /* ---------------- Admin ---------------- */
-function AdminPanel({ days, bookingsByDay, addBooking, removeBooking, wishes, setWishStatus, locks, addLock, removeLock, trainDays, removeTrainDay }) {
+function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, removeBooking, removeSeries, wishes, setWishStatus, locks, addLock, removeLock, trainDays, setTrainDayStatus, removeTrainDay }) {
   const [tab, setTab] = useState("belegung");
   const open = wishes.filter((w) => w.status === "offen").length;
   return (
@@ -356,11 +363,11 @@ function AdminPanel({ days, bookingsByDay, addBooking, removeBooking, wishes, se
           <button key={k} onClick={() => setTab(k)} style={{ ...S.tab, ...(tab === k ? S.tabActive : {}) }}>{l}</button>
         ))}
       </div>
-      {tab === "belegung" && <BookingForm days={days} bookingsByDay={bookingsByDay} addBooking={addBooking} removeBooking={removeBooking} kind="training" />}
-      {tab === "spiel" && <BookingForm days={days} bookingsByDay={bookingsByDay} addBooking={addBooking} removeBooking={removeBooking} kind="match" />}
+      {tab === "belegung" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="training" />}
+      {tab === "spiel" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="match" />}
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
-      {tab === "trainingstage" && <TrainDaysAdmin trainDays={trainDays} removeTrainDay={removeTrainDay} />}
-      {tab === "wuensche" && <WishInbox wishes={wishes} setWishStatus={setWishStatus} addBooking={addBooking} bookingsByDay={bookingsByDay} />}
+      {tab === "trainingstage" && <TrainDaysAdmin trainDays={trainDays} setTrainDayStatus={setTrainDayStatus} removeTrainDay={removeTrainDay} />}
+      {tab === "wuensche" && <WishInbox wishes={wishes} setWishStatus={setWishStatus} addBooking={addBooking} addBookingSeries={addBookingSeries} bookingsByDay={bookingsByDay} />}
     </div>
   );
 }
@@ -374,8 +381,12 @@ function Field({ label, children }) {
   );
 }
 
-function BookingForm({ days, bookingsByDay, addBooking, removeBooking, kind }) {
+function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeries, removeBooking, removeSeries, kind }) {
+  const [mode, setMode] = useState("single"); // single | series
   const [date, setDate] = useState(dayKey(days[0]));
+  const [weekday, setWeekday] = useState(1); // 0=Mo..6=So, Standard Di
+  const [seriesFrom, setSeriesFrom] = useState(dayKey(days[0]));
+  const [seriesTo, setSeriesTo] = useState(dayKey(addDays(days[0], 84))); // ~12 Wochen
   const [team, setTeam] = useState("u15");
   const [field, setField] = useState(kind === "match" ? "p1" : "p2");
   const [zone, setZone] = useState("v1");
@@ -384,13 +395,17 @@ function BookingForm({ days, bookingsByDay, addBooking, removeBooking, kind }) {
 
   const zones = fieldById(field).zones;
   const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
-  const candidate = { id: "__neu__", field, zone: safeZone, team, start, end, kind };
-  const allDayEntries = [...autoTrainingForDay(new Date(date + "T12:00")), ...(bookingsByDay[date] || [])];
   const timeInvalid = !(start < end);
-  const liveConflicts = timeInvalid ? [] : findConflicts(candidate, allDayEntries);
 
-  const add = () => {
-    if (timeInvalid) return;
+  // Konfliktvorschau nur im Einzelmodus (Serie prüft beim Speichern jeden Termin)
+  const allDayEntries = [...autoTrainingForDay(new Date(date + "T12:00")), ...(bookingsByDay[date] || [])];
+  const liveConflicts = mode === "single" && !timeInvalid
+    ? findConflicts({ id: "__neu__", field, zone: safeZone, team, start, end, kind }, allDayEntries)
+    : [];
+
+  const seriesDates = mode === "series" ? expandRecurrence(seriesFrom, seriesTo, weekday) : [];
+
+  const addSingle = () => {
     const entry = { date, field, zone: safeZone, team, start, end, kind };
     const conflicts = findConflicts({ ...entry, id: "__neu__" }, allDayEntries);
     if (conflicts.length > 0) {
@@ -402,16 +417,59 @@ function BookingForm({ days, bookingsByDay, addBooking, removeBooking, kind }) {
     addBooking(entry);
   };
 
+  const addSeries = () => {
+    if (seriesDates.length === 0) {
+      window.alert("Kein Termin im gewählten Zeitraum. Bitte Datum und Wochentag prüfen.");
+      return;
+    }
+    // Jeden Termin auf Konflikte prüfen
+    const conflictDays = [];
+    seriesDates.forEach((dk) => {
+      const existing = [...autoTrainingForDay(new Date(dk + "T12:00")), ...(bookingsByDay[dk] || [])];
+      const c = findConflicts({ id: "__neu__", field, zone: safeZone, team, start, end, kind }, existing);
+      if (c.length > 0) conflictDays.push(dk);
+    });
+    let msg = `Serie anlegen: ${WEEKDAYS_LONG[weekday]}, ${start}–${end}, ${seriesDates.length} Termine vom ${seriesFrom} bis ${seriesTo}.`;
+    if (conflictDays.length > 0) {
+      msg += `\n\n⚠️ ${conflictDays.length} Termin(e) kollidieren mit bestehenden Belegungen:\n${conflictDays.slice(0, 8).join(", ")}${conflictDays.length > 8 ? " …" : ""}\n\nTrotzdem alle anlegen?`;
+    } else {
+      msg += "\n\nAlle Termine sind frei. Anlegen?";
+    }
+    if (!window.confirm(msg)) return;
+    const seriesId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const entries = seriesDates.map((dk) => ({ date: dk, field, zone: safeZone, team, start, end, kind, seriesId }));
+    addBookingSeries(entries);
+  };
+
+  const add = () => {
+    if (timeInvalid) return;
+    if (mode === "series") addSeries();
+    else addSingle();
+  };
+
   const dayEntries = (bookingsByDay[date] || []).filter((e) => e.field === field);
 
   return (
     <div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        <button onClick={() => setMode("single")} style={{ ...S.tab, ...(mode === "single" ? S.tabActive : {}) }}>Einzeltermin</button>
+        <button onClick={() => setMode("series")} style={{ ...S.tab, ...(mode === "series" ? S.tabActive : {}) }}>Wiederkehrend</button>
+      </div>
+
       <div style={S.formGrid}>
-        <Field label="Tag">
-          <select value={date} onChange={(e) => setDate(e.target.value)} style={S.select}>
-            {days.map((d) => <option key={dayKey(d)} value={dayKey(d)}>{WEEKDAYS_LONG[(d.getDay() + 6) % 7]} {d.getDate()}.{d.getMonth() + 1}.</option>)}
-          </select>
-        </Field>
+        {mode === "single" ? (
+          <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={S.select} /></Field>
+        ) : (
+          <>
+            <Field label="Wochentag">
+              <select value={weekday} onChange={(e) => setWeekday(Number(e.target.value))} style={S.select}>
+                {WEEKDAYS_LONG.map((d, i) => <option key={i} value={i}>{d}</option>)}
+              </select>
+            </Field>
+            <Field label="Ab Datum"><input type="date" value={seriesFrom} onChange={(e) => setSeriesFrom(e.target.value)} style={S.select} /></Field>
+            <Field label="Bis Datum"><input type="date" value={seriesTo} onChange={(e) => setSeriesTo(e.target.value)} style={S.select} /></Field>
+          </>
+        )}
         <Field label="Mannschaft">
           <select value={team} onChange={(e) => setTeam(e.target.value)} style={S.select}>
             {TEAMS.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -432,24 +490,32 @@ function BookingForm({ days, bookingsByDay, addBooking, removeBooking, kind }) {
       </div>
 
       {timeInvalid && <div style={S.warnBanner}>⚠️ Die Endzeit muss nach der Startzeit liegen.</div>}
-      {!timeInvalid && liveConflicts.length > 0 && (
+      {mode === "single" && !timeInvalid && liveConflicts.length > 0 && (
         <div style={S.warnBanner}>
           ⚠️ Doppelbelegung: {fieldById(field)?.name} ist {start}–{end} schon belegt durch{" "}
           {liveConflicts.map((c) => `${teamById(c.team)?.name || c.team}${c.auto ? " (fix)" : ""}`).join(", ")}. Eintragen ist möglich, wird aber nachgefragt.
         </div>
       )}
+      {mode === "series" && !timeInvalid && (
+        <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>
+          Serie: <b>{seriesDates.length}</b> {WEEKDAYS_LONG[weekday]}-Termine im gewählten Zeitraum. Konflikte werden beim Anlegen geprüft.
+        </div>
+      )}
 
       <button style={{ ...S.primaryBtn, ...(timeInvalid ? S.btnDisabled : {}) }} onClick={add} disabled={timeInvalid}>
-        {kind === "match" ? "Heimspiel eintragen" : "Belegung eintragen"}
+        {mode === "series" ? "Serie anlegen" : kind === "match" ? "Heimspiel eintragen" : "Belegung eintragen"}
       </button>
 
-      {dayEntries.length > 0 && (
+      {mode === "single" && dayEntries.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <div style={S.subHead}>Einträge an diesem Tag ({fieldById(field).name})</div>
           {dayEntries.map((e) => (
             <div key={e.id} style={S.listRow}>
-              <span><b>{teamById(e.team)?.name || e.team}</b> · {fieldById(e.field).name} · {fieldById(e.field).zones.find((z) => z.id === e.zone)?.label} · {e.start}–{e.end}{e.kind === "match" && " · Heimspiel"}</span>
-              <button style={S.delBtn} onClick={() => removeBooking(e.id)}>Löschen</button>
+              <span><b>{teamById(e.team)?.name || e.team}</b> · {fieldById(e.field).name} · {fieldById(e.field).zones.find((z) => z.id === e.zone)?.label} · {e.start}–{e.end}{e.kind === "match" && " · Heimspiel"}{e.seriesId && " · Serie"}</span>
+              <span style={{ display: "flex", gap: 6 }}>
+                {e.seriesId && <button style={S.delBtn} onClick={() => { if (window.confirm("Die ganze Serie löschen?")) removeSeries(e.seriesId, bookings); }}>Serie löschen</button>}
+                <button style={S.delBtn} onClick={() => removeBooking(e.id)}>Löschen</button>
+              </span>
             </div>
           ))}
         </div>
@@ -492,45 +558,85 @@ function LockForm({ locks, addLock, removeLock }) {
   );
 }
 
-function TrainDaysAdmin({ trainDays, removeTrainDay }) {
+function TrainDaysAdmin({ trainDays, setTrainDayStatus, removeTrainDay }) {
   const entries = Object.entries(trainDays).filter(([, v]) => v && v.days && v.days.length);
+  const statusLabel = (s) => s === "abgelehnt" ? "✕ abgelehnt" : s === "bestaetigt" ? "✓ bestätigt" : "offen";
+  const statusColor = (s) => s === "abgelehnt" ? C.danger : s === "bestaetigt" ? C.ok : C.textSec;
   return (
     <div>
-      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>Von den Trainern gemeldete regelmäßige Trainingstage. Veraltete Meldungen kannst du entfernen.</p>
+      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>Von den Trainern gemeldete regelmäßige Trainingstage. Du kannst sie bestätigen, mit Grund ablehnen oder ganz entfernen.</p>
       {entries.length === 0 && <p style={{ color: C.textSec, fontSize: 14 }}>Noch keine Trainingstage gemeldet.</p>}
       {entries.map(([teamId, v]) => (
-        <div key={teamId} style={S.listRow}>
-          <span><b>{teamById(teamId)?.name || teamId}</b> · {v.days.map((d) => WEEKDAYS[d]).join(", ")} · {v.start}–{v.end} · {fieldById(v.field)?.name}</span>
-          <button style={S.delBtn} onClick={() => { if (window.confirm(`Trainingstage von ${teamById(teamId)?.name} löschen?`)) removeTrainDay(teamId); }}>Löschen</button>
+        <div key={teamId} style={{ ...S.listRow, flexWrap: "wrap" }}>
+          <span style={{ flex: "1 1 240px" }}>
+            <b>{teamById(teamId)?.name || teamId}</b> · {v.days.map((d) => WEEKDAYS[d]).join(", ")} · {v.start}–{v.end} · {fieldById(v.field)?.name}
+            <span style={{ marginLeft: 8, fontSize: 12, color: statusColor(v.status) }}>{statusLabel(v.status)}</span>
+            {v.status === "abgelehnt" && v.reason && <div style={{ fontSize: 12, color: C.textSec }}>Grund: {v.reason}</div>}
+          </span>
+          <span style={{ display: "flex", gap: 6 }}>
+            <button style={S.okBtn} onClick={() => setTrainDayStatus(teamId, "bestaetigt", "")}>Bestätigen</button>
+            <button style={S.delBtn} onClick={() => {
+              const reason = window.prompt(`Trainingstage von ${teamById(teamId)?.name} ablehnen – Grund (optional, wird dem Trainer angezeigt):`, "");
+              if (reason === null) return; // abgebrochen
+              setTrainDayStatus(teamId, "abgelehnt", reason || "");
+            }}>Ablehnen</button>
+            <button style={S.delBtn} onClick={() => { if (window.confirm(`Trainingstage von ${teamById(teamId)?.name} ganz löschen?`)) removeTrainDay(teamId); }}>Löschen</button>
+          </span>
         </div>
       ))}
     </div>
   );
 }
 
-function WishInbox({ wishes, setWishStatus, addBooking, bookingsByDay }) {
+function WishInbox({ wishes, setWishStatus, addBooking, addBookingSeries, bookingsByDay }) {
   const open = wishes.filter((w) => w.status === "offen");
   const closed = wishes.filter((w) => w.status !== "offen");
+
   const decide = (wish, status) => {
     if (status === "angenommen") {
-      const entry = { date: wish.date, field: wish.field, zone: wish.zone, team: wish.team, start: wish.start, end: wish.end, kind: "training" };
-      const allDayEntries = [...autoTrainingForDay(new Date(wish.date + "T12:00")), ...(bookingsByDay[wish.date] || [])];
-      const conflicts = findConflicts({ ...entry, id: "__neu__" }, allDayEntries);
-      if (conflicts.length > 0) {
-        const list = conflicts.map((c) => `• ${teamById(c.team)?.name || c.team} (${c.start}–${c.end})${c.auto ? " – fix" : ""}`).join("\n");
-        if (!window.confirm(`Achtung – Doppelbelegung!\n\n${fieldById(wish.field)?.name} ist belegt durch:\n${list}\n\nWunsch trotzdem annehmen?`)) return;
+      if (wish.recur) {
+        // Wiederkehrender Wunsch -> ganze Serie erzeugen
+        const dates = expandRecurrence(wish.recur.from, wish.recur.to, wish.recur.weekday);
+        if (dates.length === 0) { window.alert("Kein Termin im Zeitraum des Wunsches."); return; }
+        const conflictDays = [];
+        dates.forEach((dk) => {
+          const existing = [...autoTrainingForDay(new Date(dk + "T12:00")), ...(bookingsByDay[dk] || [])];
+          if (findConflicts({ id: "__neu__", field: wish.field, zone: wish.zone, team: wish.team, start: wish.start, end: wish.end }, existing).length > 0) conflictDays.push(dk);
+        });
+        let msg = `Serien-Wunsch annehmen: ${WEEKDAYS_LONG[wish.recur.weekday]}, ${wish.start}–${wish.end}, ${dates.length} Termine.`;
+        if (conflictDays.length > 0) msg += `\n\n⚠️ ${conflictDays.length} Termin(e) kollidieren:\n${conflictDays.slice(0, 8).join(", ")}${conflictDays.length > 8 ? " …" : ""}\n\nTrotzdem alle anlegen?`;
+        else msg += "\n\nAlle frei. Anlegen?";
+        if (!window.confirm(msg)) return;
+        const seriesId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        addBookingSeries(dates.map((dk) => ({ date: dk, field: wish.field, zone: wish.zone, team: wish.team, start: wish.start, end: wish.end, kind: "training", seriesId })));
+      } else {
+        const entry = { date: wish.date, field: wish.field, zone: wish.zone, team: wish.team, start: wish.start, end: wish.end, kind: "training" };
+        const allDayEntries = [...autoTrainingForDay(new Date(wish.date + "T12:00")), ...(bookingsByDay[wish.date] || [])];
+        const conflicts = findConflicts({ ...entry, id: "__neu__" }, allDayEntries);
+        if (conflicts.length > 0) {
+          const list = conflicts.map((c) => `• ${teamById(c.team)?.name || c.team} (${c.start}–${c.end})${c.auto ? " – fix" : ""}`).join("\n");
+          if (!window.confirm(`Achtung – Doppelbelegung!\n\n${fieldById(wish.field)?.name} ist belegt durch:\n${list}\n\nWunsch trotzdem annehmen?`)) return;
+        }
+        addBooking(entry);
       }
-      addBooking(entry);
+      setWishStatus(wish.id, status);
+    } else {
+      // Ablehnen: optional einen Grund erfassen
+      const reason = window.prompt("Grund für die Ablehnung (optional, wird dem Trainer angezeigt):", "") || "";
+      setWishStatus(wish.id, status, reason);
     }
-    setWishStatus(wish.id, status);
   };
+  const wishWhen = (w) => w.recur
+    ? `jeden ${WEEKDAYS_LONG[w.recur.weekday]} · ${w.recur.from} bis ${w.recur.to}`
+    : w.date;
   return (
     <div>
       {open.length === 0 && <p style={{ color: C.textSec, fontSize: 14 }}>Keine offenen Wünsche.</p>}
       {open.map((w) => (
         <div key={w.id} style={S.wishRow}>
           <div>
-            <b>{teamById(w.team)?.name || w.team}</b> wünscht {fieldById(w.field)?.name} ({fieldById(w.field)?.zones.find((z) => z.id === w.zone)?.label}) · {w.date} · {w.start}–{w.end}
+            <b>{teamById(w.team)?.name || w.team}</b> wünscht {fieldById(w.field)?.name} ({fieldById(w.field)?.zones.find((z) => z.id === w.zone)?.label}) · {wishWhen(w)} · {w.start}–{w.end}
+            {w.recur && <span style={{ ...S.zoneBadge, marginLeft: 6 }}>Serie</span>}
             {w.note && <div style={{ fontSize: 12, color: C.textSec }}>„{w.note}"</div>}
           </div>
           <div style={{ display: "flex", gap: 6 }}>
@@ -544,7 +650,7 @@ function WishInbox({ wishes, setWishStatus, addBooking, bookingsByDay }) {
           <div style={S.subHead}>Bearbeitet</div>
           {closed.slice(-8).reverse().map((w) => (
             <div key={w.id} style={{ ...S.listRow, opacity: 0.7 }}>
-              <span>{teamById(w.team)?.name} · {w.date} · {w.start}–{w.end}</span>
+              <span>{teamById(w.team)?.name} · {wishWhen(w)} · {w.start}–{w.end}{w.status === "abgelehnt" && w.reason ? ` · Grund: ${w.reason}` : ""}</span>
               <span style={{ fontSize: 12, color: w.status === "angenommen" ? C.ok : C.danger }}>{w.status === "angenommen" ? "✓ angenommen" : "✕ abgelehnt"}</span>
             </div>
           ))}
@@ -581,6 +687,16 @@ function TrainDaysForm({ trainerTeam, trainDays, saveTrainDay }) {
   return (
     <div>
       <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>Melde die regelmäßigen Trainingstage für <b>{teamById(trainerTeam)?.name}</b>. Der Admin nutzt sie als Grundlage für den Jahresplan.</p>
+      {existing.status === "abgelehnt" && (
+        <div style={S.warnBanner}>
+          ✕ Der Admin hat diese Trainingstage abgelehnt{existing.reason ? `: ${existing.reason}` : ""}. Du kannst sie anpassen und erneut speichern.
+        </div>
+      )}
+      {existing.status === "bestaetigt" && (
+        <div style={{ ...S.warnBanner, background: "#e1f5ee", color: C.ok, border: "1px solid #9fd8c5" }}>
+          ✓ Diese Trainingstage wurden vom Admin bestätigt.
+        </div>
+      )}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
         {WEEKDAYS_LONG.map((d, i) => (
           <button key={i} onClick={() => toggle(i)} style={{ ...S.dayPick, ...(sel.includes(i) ? S.dayPickActive : {}) }}>{d}</button>
@@ -595,7 +711,7 @@ function TrainDaysForm({ trainerTeam, trainDays, saveTrainDay }) {
           </select>
         </Field>
       </div>
-      <button style={S.primaryBtn} onClick={() => { saveTrainDay(trainerTeam, { days: sel, start, end, field }); setSaved(true); setTimeout(() => setSaved(false), 2000); }}>
+      <button style={S.primaryBtn} onClick={() => { saveTrainDay(trainerTeam, { days: sel, start, end, field, status: "offen", reason: "" }); setSaved(true); setTimeout(() => setSaved(false), 2000); }}>
         Trainingstage speichern
       </button>
       {saved && <span style={{ marginLeft: 10, color: C.ok, fontSize: 13 }}>✓ gespeichert</span>}
@@ -604,30 +720,60 @@ function TrainDaysForm({ trainerTeam, trainDays, saveTrainDay }) {
 }
 
 function WishForm({ trainerTeam, addWish, wishes, entriesForDay }) {
+  const [mode, setMode] = useState("single"); // single | series
   const [date, setDate] = useState(dayKey(addDays(new Date(), 1)));
+  const [weekday, setWeekday] = useState(1);
+  const [seriesFrom, setSeriesFrom] = useState(dayKey(addDays(new Date(), 1)));
+  const [seriesTo, setSeriesTo] = useState(dayKey(addDays(new Date(), 84)));
   const [field, setField] = useState("p2");
   const [zone, setZone] = useState("v1");
   const [start, setStart] = useState("17:30");
   const [end, setEnd] = useState("19:00");
   const [note, setNote] = useState("");
+  const [sent, setSent] = useState(false);
   const zones = fieldById(field).zones;
   const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
 
   const timeInvalid = !(start < end);
   const existingDay = entriesForDay(new Date(date + "T12:00"));
-  const liveConflicts = timeInvalid ? [] : findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, existingDay);
+  const liveConflicts = mode === "single" && !timeInvalid
+    ? findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, existingDay)
+    : [];
+  const seriesDates = mode === "series" ? expandRecurrence(seriesFrom, seriesTo, weekday) : [];
 
   const send = () => {
     if (timeInvalid) return;
-    addWish({ team: trainerTeam, date, field, zone: safeZone, start, end, note });
-    setNote("");
+    if (mode === "series") {
+      if (seriesDates.length === 0) { window.alert("Kein Termin im gewählten Zeitraum."); return; }
+      addWish({ team: trainerTeam, field, zone: safeZone, start, end, note, recur: { weekday, from: seriesFrom, to: seriesTo } });
+    } else {
+      addWish({ team: trainerTeam, date, field, zone: safeZone, start, end, note });
+    }
+    setNote(""); setSent(true); setTimeout(() => setSent(false), 2000);
   };
   const mine = wishes.filter((w) => w.team === trainerTeam).slice(-6).reverse();
 
   return (
     <div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        <button onClick={() => setMode("single")} style={{ ...S.tab, ...(mode === "single" ? S.tabActive : {}) }}>Einzeltermin</button>
+        <button onClick={() => setMode("series")} style={{ ...S.tab, ...(mode === "series" ? S.tabActive : {}) }}>Wiederkehrend</button>
+      </div>
+
       <div style={S.formGrid}>
-        <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={S.select} /></Field>
+        {mode === "single" ? (
+          <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={S.select} /></Field>
+        ) : (
+          <>
+            <Field label="Wochentag">
+              <select value={weekday} onChange={(e) => setWeekday(Number(e.target.value))} style={S.select}>
+                {WEEKDAYS_LONG.map((d, i) => <option key={i} value={i}>{d}</option>)}
+              </select>
+            </Field>
+            <Field label="Ab Datum"><input type="date" value={seriesFrom} onChange={(e) => setSeriesFrom(e.target.value)} style={S.select} /></Field>
+            <Field label="Bis Datum"><input type="date" value={seriesTo} onChange={(e) => setSeriesTo(e.target.value)} style={S.select} /></Field>
+          </>
+        )}
         <Field label="Platz">
           <select value={field} onChange={(e) => { setField(e.target.value); setZone(fieldById(e.target.value).zones[0].id); }} style={S.select}>
             {FIELDS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -644,21 +790,29 @@ function WishForm({ trainerTeam, addWish, wishes, entriesForDay }) {
       </div>
 
       {timeInvalid && <div style={S.warnBanner}>⚠️ Die Endzeit muss nach der Startzeit liegen.</div>}
-      {!timeInvalid && liveConflicts.length > 0 && (
+      {mode === "single" && !timeInvalid && liveConflicts.length > 0 && (
         <div style={S.warnBanner}>
           ⚠️ Achtung: {fieldById(field)?.name} ist zu dieser Zeit schon belegt durch{" "}
           {liveConflicts.map((c) => `${teamById(c.team)?.name || c.team}${c.auto ? " (fix)" : ""}`).join(", ")}. Du kannst den Wunsch trotzdem absenden – der Admin entscheidet.
         </div>
       )}
+      {mode === "series" && !timeInvalid && (
+        <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>
+          Serien-Wunsch: <b>{seriesDates.length}</b> {WEEKDAYS_LONG[weekday]}-Termine. Der Admin prüft Konflikte beim Annehmen.
+        </div>
+      )}
 
-      <button style={{ ...S.primaryBtn, ...(timeInvalid ? S.btnDisabled : {}) }} onClick={send} disabled={timeInvalid}>Wunsch absenden</button>
+      <button style={{ ...S.primaryBtn, ...(timeInvalid ? S.btnDisabled : {}) }} onClick={send} disabled={timeInvalid}>
+        {mode === "series" ? "Serien-Wunsch absenden" : "Wunsch absenden"}
+      </button>
+      {sent && <span style={{ marginLeft: 10, color: C.ok, fontSize: 13 }}>✓ gesendet</span>}
 
       {mine.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <div style={S.subHead}>Meine letzten Wünsche</div>
           {mine.map((w) => (
             <div key={w.id} style={S.listRow}>
-              <span>{w.date} · {fieldById(w.field)?.name} · {w.start}–{w.end}</span>
+              <span>{w.recur ? `jeden ${WEEKDAYS_LONG[w.recur.weekday]} (${w.recur.from}–${w.recur.to})` : w.date} · {fieldById(w.field)?.name} · {w.start}–{w.end}{w.status === "abgelehnt" && w.reason ? ` · Grund: ${w.reason}` : ""}</span>
               <span style={{ fontSize: 12, color: w.status === "offen" ? C.textSec : w.status === "angenommen" ? C.ok : C.danger }}>
                 {w.status === "offen" ? "offen" : w.status === "angenommen" ? "✓ angenommen" : "✕ abgelehnt"}
               </span>
@@ -672,7 +826,7 @@ function WishForm({ trainerTeam, addWish, wishes, entriesForDay }) {
 
 /* ---------------- Trainingstage-Übersicht ---------------- */
 function TrainDaysOverview({ trainDays }) {
-  const entries = Object.entries(trainDays).filter(([, v]) => v && v.days && v.days.length);
+  const entries = Object.entries(trainDays).filter(([, v]) => v && v.days && v.days.length && v.status !== "abgelehnt");
   if (entries.length === 0) return null;
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
@@ -680,7 +834,7 @@ function TrainDaysOverview({ trainDays }) {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {entries.map(([teamId, v]) => (
           <div key={teamId} style={{ ...S.chip, borderLeft: `3px solid ${teamById(teamId)?.color || C.textSec}`, minWidth: 180 }}>
-            <div style={{ fontWeight: 500, fontSize: 13 }}>{teamById(teamId)?.name}</div>
+            <div style={{ fontWeight: 500, fontSize: 13 }}>{teamById(teamId)?.name}{v.status === "bestaetigt" ? " ✓" : ""}</div>
             <div style={{ fontSize: 12, color: C.textSec }}>{v.days.map((d) => WEEKDAYS[d]).join(", ")} · {v.start}–{v.end} · {fieldById(v.field)?.name}</div>
           </div>
         ))}

@@ -29,14 +29,20 @@ function useCollection(name) {
 
 export function useBookings() {
   const { items, ready } = useCollection("bookings");
+  // Eindeutige, inhaltsbasierte ID: identische Belegung kann nicht doppelt entstehen.
+  // Ein zweiter (versehentlicher) Schreibvorgang trifft dasselbe Dokument.
+  const bookingId = (b) =>
+    [b.date, b.field, b.zone, b.team, b.start, b.end, b.kind || "training"]
+      .join("_")
+      .replace(/[^A-Za-z0-9_:-]/g, "");
   return {
     bookings: items,
     bookingsReady: ready,
-    addBooking: (b) => addDoc(collection(db, "bookings"), b),
+    addBooking: (b) => setDoc(doc(db, "bookings", bookingId(b)), b),
     // Mehrere Belegungen einer Serie auf einmal schreiben (gemeinsame seriesId)
     addBookingSeries: async (entries) => {
       const batch = writeBatch(db);
-      entries.forEach((e) => batch.set(doc(collection(db, "bookings")), e));
+      entries.forEach((e) => batch.set(doc(db, "bookings", bookingId(e)), e));
       await batch.commit();
     },
     removeBooking: (id) => deleteDoc(doc(db, "bookings", id)),

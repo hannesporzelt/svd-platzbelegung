@@ -24,6 +24,14 @@ export default function App() {
   const [activeField, setActiveField] = useState("p2");
   const [calMode, setCalMode] = useState("woche"); // woche | monat
   const [monthAnchor, setMonthAnchor] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); return d; });
+  const [moveTarget, setMoveTarget] = useState(null); // Belegung, die im Plan verschoben wird
+
+  // Belegung im Plan verschieben (behält Status bei, ohne automatische Trainer-Nachricht)
+  const doMovePlan = (b, neu) => {
+    const { id, ...rest } = b;
+    moveBooking(b.id, { ...rest, ...neu });
+    setMoveTarget(null);
+  };
 
   // Belegungen nach Tag indexieren
   const bookingsByDay = useMemo(() => {
@@ -87,6 +95,7 @@ export default function App() {
 
   return (
     <div style={S.shell}>
+      {moveTarget && <MoveDialogOverlay entry={moveTarget} onCancel={() => setMoveTarget(null)} onSave={doMovePlan} />}
       <Header
         view={view}
         setView={(v) => (v === "admin" ? requestAdmin() : setView(v))}
@@ -136,6 +145,7 @@ export default function App() {
             setActiveField={setActiveField}
             isAdmin={isAdmin}
             removeBooking={removeBooking}
+            onMove={setMoveTarget}
           />
 
           <div style={{ height: 16 }} />
@@ -180,6 +190,7 @@ export default function App() {
           messages={messages}
           setMessageDone={setMessageDone}
           removeMessage={removeMessage}
+          onMove={setMoveTarget}
         />
       )}
 
@@ -262,7 +273,7 @@ function WeekNav({ weekStart, setWeekStart }) {
 }
 
 /* ---------------- Wochenraster ---------------- */
-function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking }) {
+function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove }) {
   return (
     <div style={S.card}>
       <div style={S.gridHead}>
@@ -292,7 +303,7 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {entries.length === 0 && !lock && <span style={{ color: C.textTer, fontSize: 12, padding: "4px 0" }}>frei</span>}
                 {entries.slice().sort((a, b) => a.start.localeCompare(b.start)).map((e) => (
-                  <Chip key={e.id} entry={e} conflict={conflictIds.has(e.id)} isAdmin={isAdmin} removeBooking={removeBooking} />
+                  <Chip key={e.id} entry={e} conflict={conflictIds.has(e.id)} isAdmin={isAdmin} removeBooking={removeBooking} onMove={onMove} />
                 ))}
               </div>
             </div>
@@ -304,12 +315,12 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
   );
 }
 
-function Chip({ entry, conflict, isAdmin, removeBooking }) {
+function Chip({ entry, conflict, isAdmin, removeBooking, onMove }) {
   const t = teamById(entry.team);
   const P2_SHORT = { p2_voll: "ganz", h_ob: "Oberhaid", h_ha: "Hallstadt", v1: "V1", v2: "V2", v3: "V3", v4: "V4" };
   const zoneLabel = entry.field === "p2" ? (P2_SHORT[entry.zone] || entry.zone)
     : entry.field === "p3" ? (entry.zone === "h1" ? "H1" : "H2") : "";
-  const canDelete = isAdmin && removeBooking && !entry.auto;
+  const canEdit = isAdmin && !entry.auto;
   const del = () => {
     const d = new Date(entry.date + "T12:00");
     const ds = `${d.getDate()}.${d.getMonth() + 1}.`;
@@ -330,11 +341,21 @@ function Chip({ entry, conflict, isAdmin, removeBooking }) {
       <div style={{ fontSize: 11, color: C.textSec }}>
         {entry.start}–{entry.end}{entry.kind === "match" && " · Heimspiel"}{entry.kind === "turnier" && " · Turnier"}{entry.auto && " · fix"}
       </div>
-      {canDelete && (
-        <button onClick={del} title="Diesen Tag löschen"
-          style={{ marginTop: 5, width: "100%", border: `1px solid #e7a5a5`, background: "#fbeaea", color: C.danger, cursor: "pointer", fontSize: 11, fontWeight: 500, borderRadius: 6, padding: "3px 0" }}>
-          ✕ löschen
-        </button>
+      {canEdit && (
+        <div style={{ display: "flex", gap: 4, marginTop: 5 }}>
+          {onMove && (
+            <button onClick={() => onMove(entry)} title="Verschieben"
+              style={{ flex: 1, border: `1px solid ${C.border}`, background: C.surface, color: C.ink, cursor: "pointer", fontSize: 11, fontWeight: 500, borderRadius: 6, padding: "3px 0" }}>
+              ↔ verschieben
+            </button>
+          )}
+          {removeBooking && (
+            <button onClick={del} title="Diesen Tag löschen"
+              style={{ flex: 1, border: `1px solid #e7a5a5`, background: "#fbeaea", color: C.danger, cursor: "pointer", fontSize: 11, fontWeight: 500, borderRadius: 6, padding: "3px 0" }}>
+              ✕ löschen
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -498,7 +519,7 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
 }
 
 /* ---------------- Admin ---------------- */
-function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage }) {
+function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove }) {
   const [tab, setTab] = useState("belegung");
   const pending = bookings.filter((b) => b.status === "beantragt").length;
   const openMsg = messages.filter((m) => !m.done && m.dir !== "out").length;
@@ -520,7 +541,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       {tab === "belegung" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="training" />}
       {tab === "spiel" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="match" />}
       {tab === "turnier" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="turnier" />}
-      {tab === "verwalten" && <BookingManager bookings={bookings} removeBooking={removeBooking} removeSeries={removeSeries} />}
+      {tab === "verwalten" && <BookingManager bookings={bookings} removeBooking={removeBooking} removeSeries={removeSeries} onMove={onMove} />}
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDayApproval bookings={bookings} setBookingStatus={setBookingStatus} approveSeries={approveSeries} moveBooking={moveBooking} removeBooking={removeBooking} removeSeries={removeSeries} addMessage={addMessage} />}
       {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} />}
@@ -545,7 +566,7 @@ function zoneText(field, zone) {
 }
 
 // Platzwart: alle freigegebenen Belegungen, filterbar nach Mannschaft, einzeln oder als Serie löschbar
-function BookingManager({ bookings, removeBooking, removeSeries }) {
+function BookingManager({ bookings, removeBooking, removeSeries, onMove }) {
   const [team, setTeam] = useState("alle");
   const todayKey = dayKey(new Date());
   const list = bookings
@@ -562,7 +583,7 @@ function BookingManager({ bookings, removeBooking, removeSeries }) {
   return (
     <div>
       <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>
-        Alle freigegebenen Belegungen ab heute. Über den Filter eine Mannschaft auswählen und einzelne Tage löschen – z. B. wenn ein Trainer einen Ausfall meldet.
+        Alle freigegebenen Belegungen ab heute. Über den Filter eine Mannschaft auswählen und einzelne Tage verschieben oder löschen – z. B. wenn ein Trainer einen Ausfall meldet.
       </p>
       <div style={{ marginBottom: 12, maxWidth: 280 }}>
         <Field label="Mannschaft filtern">
@@ -579,7 +600,8 @@ function BookingManager({ bookings, removeBooking, removeSeries }) {
             <b>{teamById(b.team)?.name || b.team}</b> · {fmtDate(b.date)} · {b.start}–{b.end}
             <div style={{ fontSize: 12, color: C.textSec }}>{fieldById(b.field)?.name} · {zoneText(b.field, b.zone)}{b.kind === "match" ? " · Heimspiel" : ""}{b.kind === "turnier" ? " · Turnier" : ""}{b.seriesId ? " · Teil einer Serie" : ""}</div>
           </span>
-          <span style={{ display: "flex", gap: 6 }}>
+          <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {onMove && <button style={S.navBtn} onClick={() => onMove(b)}>Verschieben</button>}
             {b.seriesId && <button style={S.delBtn} onClick={() => { if (window.confirm("Die ganze Serie löschen (alle Termine)?")) removeSeries(b.seriesId, bookings); }}>Serie löschen</button>}
             <button style={S.delBtn} onClick={() => { if (window.confirm(`Belegung am ${fmtDate(b.date)} löschen?`)) removeBooking(b.id); }}>Diesen Tag löschen</button>
           </span>
@@ -950,6 +972,50 @@ function MoveDialog({ entry, onCancel, onSave }) {
           Verschieben & Trainer benachrichtigen
         </button>
         <button style={S.navBtn} onClick={onCancel}>Abbrechen</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Verschieben-Overlay (Wochenplan / Liste) ---------------- */
+function MoveDialogOverlay({ entry, onCancel, onSave }) {
+  const [date, setDate] = useState(entry.date);
+  const [field, setField] = useState(entry.field);
+  const [zone, setZone] = useState(entry.zone);
+  const [start, setStart] = useState(entry.start);
+  const [end, setEnd] = useState(entry.end);
+  const zones = fieldById(field).zones;
+  const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
+  const timeInvalid = !(start < end);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "8vh 12px", zIndex: 1000 }}
+      onClick={onCancel}>
+      <div style={{ ...S.card, maxWidth: 520, width: "100%", marginTop: 0 }} onClick={(e) => e.stopPropagation()}>
+        <div style={S.subHead}>{teamById(entry.team)?.name} verschieben</div>
+        <div style={S.formGrid}>
+          <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={S.select} /></Field>
+          <Field label="Platz">
+            <select value={field} onChange={(e) => { setField(e.target.value); setZone(fieldById(e.target.value).zones[0].id); }} style={S.select}>
+              {FIELDS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Einteilung / Zone">
+            <select value={safeZone} onChange={(e) => setZone(e.target.value)} style={S.select}>
+              {zones.map((z) => <option key={z.id} value={z.id}>{z.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Von"><input type="time" value={start} onChange={(e) => setStart(e.target.value)} style={S.select} /></Field>
+          <Field label="Bis"><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} style={S.select} /></Field>
+        </div>
+        {timeInvalid && <div style={S.warnBanner}>⚠️ Die Endzeit muss nach der Startzeit liegen.</div>}
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button style={{ ...S.primaryBtn, ...(timeInvalid ? S.btnDisabled : {}) }} disabled={timeInvalid}
+            onClick={() => onSave(entry, { date, field, zone: safeZone, start, end })}>
+            Verschieben
+          </button>
+          <button style={S.navBtn} onClick={onCancel}>Abbrechen</button>
+        </div>
       </div>
     </div>
   );

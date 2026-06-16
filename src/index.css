@@ -8,3 +8,10 @@ body {
 }
 button { font-family: inherit; }
 input, select { font-family: inherit; }
+
+/* Druck: nur die Monatsübersicht zeigen, Rest ausblenden */
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; }
+  @page { size: landscape; margin: 10mm; }
+}

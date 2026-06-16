@@ -19,7 +19,7 @@ function useCollection(name) {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     const unsub = onSnapshot(collection(db, name), (snap) => {
-      setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setItems(snap.docs.map((d) => ({ ...d.data(), id: d.id })));
       setReady(true);
     });
     return unsub;

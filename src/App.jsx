@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import {
   TEAMS, FIELDS, teamById, fieldById, WEEKDAYS, WEEKDAYS_LONG,
   dayKey, mondayOf, addDays, isoWeek, fmtRange, expandRecurrence, zoneCovers,
@@ -696,10 +696,18 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
     addBookingSeries(entries);
   };
 
+  const savingRef = useRef(false);
   const add = () => {
     if (timeInvalid) return;
-    if (mode === "series") addSeries();
-    else addSingle();
+    if (savingRef.current) return; // verhindert doppeltes Anlegen bei Doppelklick / StrictMode
+    savingRef.current = true;
+    try {
+      if (mode === "series") addSeries();
+      else addSingle();
+    } finally {
+      // kurze Sperre, dann wieder freigeben
+      setTimeout(() => { savingRef.current = false; }, 800);
+    }
   };
 
   const dayEntries = (bookingsByDay[date] || []).filter((e) => e.field === field);

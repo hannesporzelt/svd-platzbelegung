@@ -63,8 +63,9 @@ export default function App() {
     [weekStart]
   );
 
-  // Admin-Hinweise: offene Anträge (beantragte Trainingstage) + Konflikte + Nachrichten
-  const pendingCount = bookings.filter((b) => b.status === "beantragt").length;
+  // Admin-Hinweise: offene Anträge (beantragte Trainingstage, ab heute) + Konflikte + Nachrichten
+  const todayKeyTop = dayKey(new Date());
+  const pendingCount = bookings.filter((b) => b.status === "beantragt" && b.date >= todayKeyTop).length;
   const openMsgCount = messages.filter((m) => !m.done).length;
   const weekConflictCount = useMemo(() => {
     let n = 0;
@@ -521,7 +522,7 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
 /* ---------------- Admin ---------------- */
 function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove }) {
   const [tab, setTab] = useState("belegung");
-  const pending = bookings.filter((b) => b.status === "beantragt").length;
+  const pending = bookings.filter((b) => b.status === "beantragt" && b.date >= dayKey(new Date())).length;
   const openMsg = messages.filter((m) => !m.done && m.dir !== "out").length;
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
@@ -845,6 +846,10 @@ function TrainDayApproval({ bookings, setBookingStatus, approveSeries, moveBooki
   const pending = bookings
     .filter((b) => b.status === "beantragt" && b.date >= todayKey)
     .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+  // Vergangene, nie bearbeitete Anträge (können nur noch entfernt werden)
+  const stale = bookings
+    .filter((b) => b.status === "beantragt" && b.date < todayKey)
+    .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
 
   // nach Serie gruppieren: Einzeltermine einzeln, Serien zusammengefasst
   const singles = pending.filter((b) => !b.seriesId);
@@ -935,6 +940,19 @@ function TrainDayApproval({ bookings, setBookingStatus, approveSeries, moveBooki
           </div>
         );
       })}
+
+      {stale.length > 0 && (
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
+          <div style={S.subHead}>Ältere offene Anträge (Datum vergangen)</div>
+          <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>Diese Anträge liegen in der Vergangenheit und können nur noch entfernt werden.</p>
+          {stale.map((b) => (
+            <div key={b.id} style={{ ...S.listRow, fontSize: 13, opacity: 0.8 }}>
+              <span>{teamById(b.team)?.name} · {fmtDate(b.date)} · {b.start}–{b.end} · {fieldById(b.field)?.name}</span>
+              <button style={S.delBtn} onClick={() => removeBooking(b.id)}>Entfernen</button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

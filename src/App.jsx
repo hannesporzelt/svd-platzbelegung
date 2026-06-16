@@ -9,6 +9,9 @@ import { useBookings, useWishes, useTrainingDays, useLocks, useMessages } from "
 import { C, S } from "./lib/styles";
 import Pitch from "./components/Pitch";
 
+// Hinweistext für Trainer, wenn der gewünschte Slot belegt ist
+const CONFLICT_HINT = "Dieser Platz ist zur gewählten Zeit bereits belegt.\n\nBitte eine andere Uhrzeit oder einen anderen Trainingstag wählen – oder den Platzwart kontaktieren.\n\nDu kannst den Wunsch trotzdem absenden; der Platzwart entscheidet darüber.";
+
 export default function App() {
   const { user, isAdmin, loginAdmin, logoutAdmin } = useAuth();
   const { bookings, bookingsReady, addBooking, addBookingSeries, removeBooking, removeSeries } = useBookings();
@@ -21,6 +24,8 @@ export default function App() {
   const [trainerTeam, setTrainerTeam] = useState("u15");
   const [weekStart, setWeekStart] = useState(mondayOf(new Date()));
   const [activeField, setActiveField] = useState("p2");
+  const [calMode, setCalMode] = useState("woche"); // woche | monat
+  const [monthAnchor, setMonthAnchor] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); return d; });
 
   // Belegungen nach Tag indexieren
   const bookingsByDay = useMemo(() => {
@@ -89,39 +94,69 @@ export default function App() {
         trainerTeam={trainerTeam}
         setTrainerTeam={setTrainerTeam}
         notices={openWishCount + weekConflictCount + openMsgCount}
+        requestCount={openWishCount}
       />
 
-      <WeekNav weekStart={weekStart} setWeekStart={setWeekStart} />
-
-      {isAdmin && (openWishCount > 0 || weekConflictCount > 0 || openMsgCount > 0) && (
-        <div style={S.warnBanner}>
-          ⚠️ Hinweis für Platzwart:
-          {weekConflictCount > 0 && ` ${weekConflictCount} Belegung(en) mit Konflikt in dieser Woche.`}
-          {openWishCount > 0 && ` ${openWishCount} offene(r) Trainerwunsch/-wünsche.`}
-          {openMsgCount > 0 && ` ${openMsgCount} neue Nachricht(en) von Trainern.`}
-          {" "}Bitte im Platzwart-Bereich prüfen.
+      {openWishCount > 0 && (
+        <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>
+          📬 {openWishCount} Buchungsantrag{openWishCount === 1 ? "" : "-anträge"} eingegangen{isAdmin ? " – im Platzwart-Bereich unter „Wünsche“ prüfen." : ". Der Platzwart bearbeitet sie."}
         </div>
       )}
 
-      <WeekGrid
-        days={days}
-        entriesForDay={entriesForDay}
-        lockForDayField={lockForDayField}
-        activeField={activeField}
-        setActiveField={setActiveField}
-        isAdmin={isAdmin}
-        removeBooking={removeBooking}
-      />
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={S.roleSwitch}>
+          <button onClick={() => setCalMode("woche")} style={{ ...S.roleBtn, ...(calMode === "woche" ? S.roleBtnActive : {}) }}>Woche</button>
+          <button onClick={() => setCalMode("monat")} style={{ ...S.roleBtn, ...(calMode === "monat" ? S.roleBtnActive : {}) }}>Monat</button>
+        </div>
+        {calMode === "monat" && (
+          <button style={S.navBtn} className="no-print" onClick={() => window.print()}>🖨 Drucken</button>
+        )}
+      </div>
 
-      <div style={{ height: 16 }} />
+      {calMode === "woche" && (
+        <>
+          <WeekNav weekStart={weekStart} setWeekStart={setWeekStart} />
 
-      <FieldVisual
-        days={days}
-        activeField={activeField}
-        setActiveField={setActiveField}
-        entriesForDay={entriesForDay}
-        lockForDayField={lockForDayField}
-      />
+          {isAdmin && (openWishCount > 0 || weekConflictCount > 0 || openMsgCount > 0) && (
+            <div style={S.warnBanner}>
+              ⚠️ Hinweis für Platzwart:
+              {weekConflictCount > 0 && ` ${weekConflictCount} Belegung(en) mit Konflikt in dieser Woche.`}
+              {openWishCount > 0 && ` ${openWishCount} offene(r) Trainerwunsch/-wünsche.`}
+              {openMsgCount > 0 && ` ${openMsgCount} neue Nachricht(en) von Trainern.`}
+              {" "}Bitte im Platzwart-Bereich prüfen.
+            </div>
+          )}
+
+          <WeekGrid
+            days={days}
+            entriesForDay={entriesForDay}
+            lockForDayField={lockForDayField}
+            activeField={activeField}
+            setActiveField={setActiveField}
+            isAdmin={isAdmin}
+            removeBooking={removeBooking}
+          />
+
+          <div style={{ height: 16 }} />
+
+          <FieldVisual
+            days={days}
+            activeField={activeField}
+            setActiveField={setActiveField}
+            entriesForDay={entriesForDay}
+            lockForDayField={lockForDayField}
+          />
+        </>
+      )}
+
+      {calMode === "monat" && (
+        <MonthView
+          monthAnchor={monthAnchor}
+          setMonthAnchor={setMonthAnchor}
+          entriesForDay={entriesForDay}
+          lockForDayField={lockForDayField}
+        />
+      )}
 
       {view === "admin" && isAdmin && (
         <AdminPanel
@@ -178,7 +213,7 @@ export default function App() {
 }
 
 /* ---------------- Header ---------------- */
-function Header({ view, setView, isAdmin, logoutAdmin, trainerTeam, setTrainerTeam, notices }) {
+function Header({ view, setView, isAdmin, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount }) {
   return (
     <header style={S.header}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -191,9 +226,10 @@ function Header({ view, setView, isAdmin, logoutAdmin, trainerTeam, setTrainerTe
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <div style={S.roleSwitch}>
           {[["viewer", "Betrachter"], ["trainer", "Trainer"], ["admin", "Platzwart"]].map(([k, label]) => (
-            <button key={k} onClick={() => setView(k)} style={{ ...S.roleBtn, ...(view === k ? S.roleBtnActive : {}) }}>
+            <button key={k} onClick={() => setView(k)} style={{ ...S.roleBtn, ...(view === k ? S.roleBtnActive : {}) }}
+              title={k === "admin" && requestCount > 0 ? `${requestCount} Buchungsantrag/-anträge eingegangen` : undefined}>
               {label}
-              {k === "admin" && isAdmin && notices > 0 && <span style={S.badge}>{notices}</span>}
+              {k === "admin" && requestCount > 0 && <span style={S.badge}>{requestCount}</span>}
             </button>
           ))}
         </div>
@@ -370,6 +406,85 @@ function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockFor
   );
 }
 
+/* ---------------- Monatsübersicht (druckbar) ---------------- */
+const MONTHS_LONG = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+
+function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField }) {
+  const year = monthAnchor.getFullYear();
+  const month = monthAnchor.getMonth();
+  const shiftMonth = (delta) => { const d = new Date(year, month + delta, 1); setMonthAnchor(d); };
+  const toThisMonth = () => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); setMonthAnchor(d); };
+
+  // Raster: erste Zelle = Montag der Woche, in der der Monatsanfang liegt
+  const first = new Date(year, month, 1);
+  const gridStart = mondayOf(first);
+  const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i)); // 6 Wochen
+  // letzte Zeile weglassen, wenn komplett im Folgemonat
+  const usedRows = cells.some((d, i) => i >= 35 && d.getMonth() === month) ? 6 : 5;
+  const shownCells = cells.slice(0, usedRows * 7);
+
+  const fieldShort = { p1: "P1", p2: "P2", p3: "P3" };
+  const zoneShort = { p2_voll: "ganz", h_ob: "Ob", h_ha: "Ha", v1: "V1", v2: "V2", v3: "V3", v4: "V4", h1: "H1", h2: "H2", voll: "" };
+
+  return (
+    <div style={S.card} className="print-area">
+      <div style={S.gridHead}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }} className="no-print">
+          <button style={S.navBtn} onClick={() => shiftMonth(-1)}>‹</button>
+          <button style={S.navBtn} onClick={toThisMonth}>Heute</button>
+          <button style={S.navBtn} onClick={() => shiftMonth(1)}>›</button>
+        </div>
+        <span style={{ fontSize: 18 }}>{MONTHS_LONG[month]} {year}</span>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+        {WEEKDAYS.map((w) => (
+          <div key={w} style={{ fontWeight: 600, fontSize: 12, textAlign: "center", padding: "4px 0", color: C.textSec }}>{w}</div>
+        ))}
+        {shownCells.map((d) => {
+          const inMonth = d.getMonth() === month;
+          const today = dayKey(d) === dayKey(new Date());
+          const entries = entriesForDay(d).slice().sort((a, b) => a.start.localeCompare(b.start));
+          const anyLock = ["p1", "p2", "p3"].map((f) => lockForDayField(d, f)).filter(Boolean);
+          return (
+            <div key={dayKey(d)} style={{
+              border: `1px solid ${C.border}`, borderRadius: 8, minHeight: 92, padding: 5,
+              background: inMonth ? (today ? "#eef7f0" : C.surface) : "#f5f4ef",
+              opacity: inMonth ? 1 : 0.55,
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3, color: today ? C.brand : C.ink }}>{d.getDate()}</div>
+              {anyLock.length > 0 && <div style={{ fontSize: 9, color: C.danger, marginBottom: 2 }}>⛔ gesperrt</div>}
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {entries.slice(0, 5).map((e) => {
+                  const t = teamById(e.team);
+                  return (
+                    <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, lineHeight: 1.2 }}>
+                      <span style={{ width: 7, height: 7, borderRadius: 2, background: t ? t.color : C.textSec, flex: "none" }} />
+                      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {e.start} {t ? t.name : e.team} <span style={{ color: C.textSec }}>{fieldShort[e.field]}{zoneShort[e.zone] ? "·" + zoneShort[e.zone] : ""}</span>
+                      </span>
+                    </div>
+                  );
+                })}
+                {entries.length > 5 && <div style={{ fontSize: 9, color: C.textSec }}>+{entries.length - 5} weitere</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: "4px 12px", fontSize: 11, color: C.textSec }}>
+        {TEAMS.map((t) => (
+          <span key={t.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 2, background: t.color, display: "inline-block" }} />{t.name}
+          </span>
+        ))}
+      </div>
+      <p style={{ fontSize: 11, color: C.textSec, marginTop: 8 }}>P1 = Platz 1, P2 = Platz 2 (Ob = Oberhaid, Ha = Hallstadt, V1–V4 Viertel), P3 = Platz 3 (H1/H2).</p>
+    </div>
+  );
+}
+
 /* ---------------- Admin ---------------- */
 function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, removeBooking, removeSeries, wishes, setWishStatus, locks, addLock, removeLock, trainDays, setTrainDayStatus, removeTrainDay, messages, setMessageDone, removeMessage }) {
   const [tab, setTab] = useState("belegung");
@@ -394,7 +509,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       {tab === "belegung" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="training" />}
       {tab === "spiel" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="match" />}
       {tab === "turnier" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="turnier" />}
-      {tab === "verwalten" && <BookingManager bookings={bookings} removeBooking={removeBooking} removeSeries={removeSeries} />}
+      {tab === "verwalten" && <BookingManager bookings={bookings} removeBooking={removeBooking} removeSeries={removeSeries} trainDays={trainDays} removeTrainDay={removeTrainDay} />}
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDaysAdmin trainDays={trainDays} setTrainDayStatus={setTrainDayStatus} removeTrainDay={removeTrainDay} />}
       {tab === "wuensche" && <WishInbox wishes={wishes} setWishStatus={setWishStatus} addBooking={addBooking} addBookingSeries={addBookingSeries} bookingsByDay={bookingsByDay} />}
@@ -420,7 +535,7 @@ function zoneText(field, zone) {
 }
 
 // Platzwart: alle Belegungen, filterbar nach Mannschaft, einzeln oder als Serie löschbar
-function BookingManager({ bookings, removeBooking, removeSeries }) {
+function BookingManager({ bookings, removeBooking, removeSeries, trainDays, removeTrainDay }) {
   const [team, setTeam] = useState("alle");
   const todayKey = dayKey(new Date());
   const list = bookings
@@ -432,6 +547,10 @@ function BookingManager({ bookings, removeBooking, removeSeries }) {
     const d = new Date(dk + "T12:00");
     return `${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
   };
+
+  const trainEntries = Object.entries(trainDays || {})
+    .filter(([, v]) => v && v.days && v.days.length)
+    .filter(([teamId]) => team === "alle" || teamId === team);
 
   return (
     <div>
@@ -459,6 +578,20 @@ function BookingManager({ bookings, removeBooking, removeSeries }) {
           </span>
         </div>
       ))}
+
+      <div style={{ marginTop: 20, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
+        <div style={S.subHead}>Gemeldete Trainingstage</div>
+        {trainEntries.length === 0 && <p style={{ color: C.textSec, fontSize: 14 }}>Keine gemeldeten Trainingstage{team !== "alle" ? " für diese Mannschaft" : ""}.</p>}
+        {trainEntries.map(([teamId, v]) => (
+          <div key={teamId} style={{ ...S.listRow, flexWrap: "wrap" }}>
+            <span style={{ flex: "1 1 260px", borderLeft: `3px solid ${teamById(teamId)?.color || C.textSec}`, paddingLeft: 8 }}>
+              <b>{teamById(teamId)?.name || teamId}</b> · {v.days.map((d) => WEEKDAYS[d]).join(", ")} · {v.start}–{v.end}
+              <div style={{ fontSize: 12, color: C.textSec }}>{fieldById(v.field)?.name}{v.status === "bestaetigt" ? " · ✓ bestätigt" : v.status === "abgelehnt" ? " · ✕ abgelehnt" : " · offen"}</div>
+            </span>
+            <button style={S.delBtn} onClick={() => { if (window.confirm(`Gemeldete Trainingstage von ${teamById(teamId)?.name} löschen?`)) removeTrainDay(teamId); }}>Löschen</button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -857,9 +990,25 @@ function TrainDaysForm({ trainerTeam, trainDays, saveTrainDay, addWish, entriesF
   const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
   const timeInvalid = !(start < end);
 
+  // Konfliktvorschau: prüft alle gewählten Wochentage über die Datumsspanne
+  const seriesConflictCount = (() => {
+    if (timeInvalid || sel.length === 0) return 0;
+    let n = 0;
+    sel.forEach((wd) => {
+      expandRecurrence(seriesFrom, seriesTo, wd).forEach((dk) => {
+        const existing = entriesForDay(new Date(dk + "T12:00"));
+        if (findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, existing).length > 0) n++;
+      });
+    });
+    return n;
+  })();
+
   // Serien-Wunsch: pro gewähltem Wochentag eine Serie an den Platzwart senden
   const sendAsSeries = () => {
     if (timeInvalid || sel.length === 0) return;
+    if (seriesConflictCount > 0) {
+      if (!window.confirm(`${CONFLICT_HINT}\n\n(${seriesConflictCount} Termin(e) betroffen)`)) return;
+    }
     sel.forEach((wd) => {
       addWish({ team: trainerTeam, field, zone: safeZone, start, end, note: "aus Trainingstagen", recur: { weekday: wd, from: seriesFrom, to: seriesTo } });
     });
@@ -916,6 +1065,11 @@ function TrainDaysForm({ trainerTeam, trainDays, saveTrainDay, addWish, entriesF
           <Field label="Bis Datum"><input type="date" value={seriesTo} onChange={(e) => setSeriesTo(e.target.value)} style={S.select} /></Field>
         </div>
         {sel.length === 0 && <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>Bitte oben mindestens einen Wochentag wählen.</div>}
+        {sel.length > 0 && seriesConflictCount > 0 && (
+          <div style={S.warnBanner}>
+            ⚠️ An {seriesConflictCount} Termin(en) im gewählten Zeitraum ist {fieldById(field)?.name} bereits belegt. Du kannst den Wunsch trotzdem senden – der Platzwart entscheidet.
+          </div>
+        )}
         <button
           style={{ ...S.primaryBtn, ...((timeInvalid || sel.length === 0) ? S.btnDisabled : {}) }}
           onClick={sendAsSeries}
@@ -950,13 +1104,18 @@ function WishForm({ trainerTeam, addWish, wishes, entriesForDay }) {
     ? findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, existingDay)
     : [];
   const seriesDates = mode === "series" ? expandRecurrence(seriesFrom, seriesTo, weekday) : [];
+  const seriesConflicts = mode === "series" && !timeInvalid
+    ? seriesDates.filter((dk) => findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, entriesForDay(new Date(dk + "T12:00"))).length > 0)
+    : [];
 
   const send = () => {
     if (timeInvalid) return;
     if (mode === "series") {
       if (seriesDates.length === 0) { window.alert("Kein Termin im gewählten Zeitraum."); return; }
+      if (seriesConflicts.length > 0 && !window.confirm(`${CONFLICT_HINT}\n\n(${seriesConflicts.length} von ${seriesDates.length} Terminen betroffen)`)) return;
       addWish({ team: trainerTeam, field, zone: safeZone, start, end, note, recur: { weekday, from: seriesFrom, to: seriesTo } });
     } else {
+      if (liveConflicts.length > 0 && !window.confirm(CONFLICT_HINT)) return;
       addWish({ team: trainerTeam, date, field, zone: safeZone, start, end, note });
     }
     setNote(""); setSent(true); setTimeout(() => setSent(false), 2000);

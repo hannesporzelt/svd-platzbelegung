@@ -119,26 +119,13 @@ export const expandRecurrence = (fromKey, toKey, weekday) => {
   return out;
 };
 
-// ---------- Auto-Belegung 1./2. Mannschaft ----------
-// Di + Do, 18:30–21:00, Platz 2. Je Mannschaft 2 Viertel (= halber Platz).
-// Wöchentlicher Wechsel der Hälfte (Oberhaid <-> Hallstadt).
-export const autoTrainingForDay = (date) => {
-  const wd = (date.getDay() + 6) % 7;
-  if (wd !== 1 && wd !== 3) return [];
-  const wk = isoWeek(date);
-  const swap = wk % 2 === 0;
-  const oberhaid = ["v1", "v2"];
-  const hallstadt = ["v3", "v4"];
-  const m1Zones = swap ? hallstadt : oberhaid;
-  const m2Zones = swap ? oberhaid : hallstadt;
-  const mk = (teamId, zones) =>
-    zones.map((z) => ({
-      id: `auto-${dayKey(date)}-${teamId}-${z}`,
-      field: "p2", zone: z, team: teamId,
-      start: "18:30", end: "21:00", kind: "training", auto: true,
-    }));
-  return [...mk("m1", m1Zones), ...mk("m2", m2Zones)];
-};
+// ---------- (entfernt) Auto-Belegung 1./2. Mannschaft ----------
+// Früher wurde das Di/Do-Training der 1./2. Mannschaft fest erzeugt.
+// Auf Wunsch entfernt: Es wird jetzt ganz normal über
+// "Belegung eintragen -> Wiederkehrend" als Serie angelegt.
+// Die Funktion bleibt als leere Liste erhalten, damit die
+// Konfliktprüfung an allen Stellen unverändert weiterläuft.
+export const autoTrainingForDay = (date) => [];
 
 // ---------- Doppelbelegung erkennen ----------
 const toMin = (t) => {

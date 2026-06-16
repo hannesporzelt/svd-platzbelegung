@@ -109,6 +109,8 @@ export default function App() {
         lockForDayField={lockForDayField}
         activeField={activeField}
         setActiveField={setActiveField}
+        isAdmin={isAdmin}
+        removeBooking={removeBooking}
       />
 
       <div style={{ height: 16 }} />
@@ -226,7 +228,7 @@ function WeekNav({ weekStart, setWeekStart }) {
 }
 
 /* ---------------- Wochenraster ---------------- */
-function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField }) {
+function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking }) {
   return (
     <div style={S.card}>
       <div style={S.gridHead}>
@@ -256,7 +258,7 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {entries.length === 0 && !lock && <span style={{ color: C.textTer, fontSize: 12, padding: "4px 0" }}>frei</span>}
                 {entries.slice().sort((a, b) => a.start.localeCompare(b.start)).map((e) => (
-                  <Chip key={e.id} entry={e} conflict={conflictIds.has(e.id)} />
+                  <Chip key={e.id} entry={e} conflict={conflictIds.has(e.id)} isAdmin={isAdmin} removeBooking={removeBooking} />
                 ))}
               </div>
             </div>
@@ -268,11 +270,19 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
   );
 }
 
-function Chip({ entry, conflict }) {
+function Chip({ entry, conflict, isAdmin, removeBooking }) {
   const t = teamById(entry.team);
   const P2_SHORT = { p2_voll: "ganz", h_ob: "Oberhaid", h_ha: "Hallstadt", v1: "V1", v2: "V2", v3: "V3", v4: "V4" };
   const zoneLabel = entry.field === "p2" ? (P2_SHORT[entry.zone] || entry.zone)
     : entry.field === "p3" ? (entry.zone === "h1" ? "H1" : "H2") : "";
+  const canDelete = isAdmin && removeBooking && !entry.auto;
+  const del = () => {
+    const d = new Date(entry.date + "T12:00");
+    const ds = `${d.getDate()}.${d.getMonth() + 1}.`;
+    if (window.confirm(`Belegung löschen?\n\n${t ? t.name : entry.team} · ${ds} · ${entry.start}–${entry.end}`)) {
+      removeBooking(entry.id);
+    }
+  };
   return (
     <div style={{ ...S.chip, borderLeft: `3px solid ${t ? t.color : C.textSec}`, ...(conflict ? { background: "#fbeaea", borderColor: "#e7a5a5" } : {}) }}
       title={conflict ? "Doppelbelegung – gleiche Zone und Zeit" : undefined}>
@@ -281,10 +291,16 @@ function Chip({ entry, conflict }) {
           {conflict && <span style={{ color: C.danger }}>⚠️ </span>}
           {t ? t.name : entry.team}
         </span>
-        {zoneLabel && <span style={S.zoneBadge}>{zoneLabel}</span>}
+        <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          {zoneLabel && <span style={S.zoneBadge}>{zoneLabel}</span>}
+          {canDelete && (
+            <button onClick={del} title="Diesen Tag löschen"
+              style={{ border: "none", background: "transparent", color: C.danger, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "0 2px" }}>×</button>
+          )}
+        </span>
       </div>
       <div style={{ fontSize: 11, color: C.textSec }}>
-        {entry.start}–{entry.end}{entry.kind === "match" && " · Heimspiel"}{entry.auto && " · fix"}
+        {entry.start}–{entry.end}{entry.kind === "match" && " · Heimspiel"}{entry.kind === "turnier" && " · Turnier"}{entry.auto && " · fix"}
       </div>
     </div>
   );
@@ -365,6 +381,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
         {[
           ["belegung", "Belegung eintragen"],
           ["spiel", "Heimspiel"],
+          ["turnier", "Turnier"],
           ["verwalten", "Belegungen verwalten"],
           ["sperre", "Platzsperre"],
           ["trainingstage", "Trainingstage"],
@@ -376,6 +393,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       </div>
       {tab === "belegung" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="training" />}
       {tab === "spiel" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="match" />}
+      {tab === "turnier" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="turnier" />}
       {tab === "verwalten" && <BookingManager bookings={bookings} removeBooking={removeBooking} removeSeries={removeSeries} />}
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDaysAdmin trainDays={trainDays} setTrainDayStatus={setTrainDayStatus} removeTrainDay={removeTrainDay} />}
@@ -433,7 +451,7 @@ function BookingManager({ bookings, removeBooking, removeSeries }) {
         <div key={b.id} style={{ ...S.listRow, flexWrap: "wrap" }}>
           <span style={{ flex: "1 1 260px", borderLeft: `3px solid ${teamById(b.team)?.color || C.textSec}`, paddingLeft: 8 }}>
             <b>{teamById(b.team)?.name || b.team}</b> · {fmtDate(b.date)} · {b.start}–{b.end}
-            <div style={{ fontSize: 12, color: C.textSec }}>{fieldById(b.field)?.name} · {zoneText(b.field, b.zone)}{b.kind === "match" ? " · Heimspiel" : ""}{b.seriesId ? " · Teil einer Serie" : ""}</div>
+            <div style={{ fontSize: 12, color: C.textSec }}>{fieldById(b.field)?.name} · {zoneText(b.field, b.zone)}{b.kind === "match" ? " · Heimspiel" : ""}{b.kind === "turnier" ? " · Turnier" : ""}{b.seriesId ? " · Teil einer Serie" : ""}</div>
           </span>
           <span style={{ display: "flex", gap: 6 }}>
             {b.seriesId && <button style={S.delBtn} onClick={() => { if (window.confirm("Die ganze Serie löschen (alle Termine)?")) removeSeries(b.seriesId, bookings); }}>Serie löschen</button>}
@@ -491,10 +509,11 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
   const [seriesFrom, setSeriesFrom] = useState(dayKey(days[0]));
   const [seriesTo, setSeriesTo] = useState(dayKey(addDays(days[0], 84))); // ~12 Wochen
   const [team, setTeam] = useState("u15");
-  const [field, setField] = useState(kind === "match" ? "p1" : "p2");
+  const matchLike = kind === "match" || kind === "turnier";
+  const [field, setField] = useState(matchLike ? "p1" : "p2");
   const [zone, setZone] = useState("v1");
-  const [start, setStart] = useState(kind === "match" ? "15:00" : "17:00");
-  const [end, setEnd] = useState(kind === "match" ? "17:00" : "18:30");
+  const [start, setStart] = useState(matchLike ? "15:00" : "17:00");
+  const [end, setEnd] = useState(matchLike ? "17:00" : "18:30");
 
   const zones = fieldById(field).zones;
   const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
@@ -606,7 +625,7 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
       )}
 
       <button style={{ ...S.primaryBtn, ...(timeInvalid ? S.btnDisabled : {}) }} onClick={add} disabled={timeInvalid}>
-        {mode === "series" ? "Serie anlegen" : kind === "match" ? "Heimspiel eintragen" : "Belegung eintragen"}
+        {mode === "series" ? "Serie anlegen" : kind === "match" ? "Heimspiel eintragen" : kind === "turnier" ? "Turnier eintragen" : "Belegung eintragen"}
       </button>
 
       {mode === "single" && dayEntries.length > 0 && (
@@ -614,7 +633,7 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
           <div style={S.subHead}>Einträge an diesem Tag ({fieldById(field).name})</div>
           {dayEntries.map((e) => (
             <div key={e.id} style={S.listRow}>
-              <span><b>{teamById(e.team)?.name || e.team}</b> · {fieldById(e.field).name} · {fieldById(e.field).zones.find((z) => z.id === e.zone)?.label} · {e.start}–{e.end}{e.kind === "match" && " · Heimspiel"}{e.seriesId && " · Serie"}</span>
+              <span><b>{teamById(e.team)?.name || e.team}</b> · {fieldById(e.field).name} · {fieldById(e.field).zones.find((z) => z.id === e.zone)?.label} · {e.start}–{e.end}{e.kind === "match" && " · Heimspiel"}{e.kind === "turnier" && " · Turnier"}{e.seriesId && " · Serie"}</span>
               <span style={{ display: "flex", gap: 6 }}>
                 {e.seriesId && <button style={S.delBtn} onClick={() => { if (window.confirm("Die ganze Serie löschen?")) removeSeries(e.seriesId, bookings); }}>Serie löschen</button>}
                 <button style={S.delBtn} onClick={() => removeBooking(e.id)}>Löschen</button>
@@ -773,7 +792,7 @@ function TrainerPanel({ trainerTeam, wishes, addWish, trainDays, saveTrainDay, e
           <button key={k} onClick={() => setTab(k)} style={{ ...S.tab, ...(tab === k ? S.tabActive : {}) }}>{l}</button>
         ))}
       </div>
-      {tab === "trainingstage" && <TrainDaysForm trainerTeam={trainerTeam} trainDays={trainDays} saveTrainDay={saveTrainDay} />}
+      {tab === "trainingstage" && <TrainDaysForm trainerTeam={trainerTeam} trainDays={trainDays} saveTrainDay={saveTrainDay} addWish={addWish} entriesForDay={entriesForDay} />}
       {tab === "wunsch" && <WishForm trainerTeam={trainerTeam} addWish={addWish} wishes={wishes} entriesForDay={entriesForDay} />}
       {tab === "nachricht" && <MessageForm trainerTeam={trainerTeam} addMessage={addMessage} messages={messages} />}
     </div>
@@ -821,17 +840,35 @@ function MessageForm({ trainerTeam, addMessage, messages }) {
   );
 }
 
-function TrainDaysForm({ trainerTeam, trainDays, saveTrainDay }) {
+function TrainDaysForm({ trainerTeam, trainDays, saveTrainDay, addWish, entriesForDay }) {
   const existing = trainDays[trainerTeam] || { days: [], start: "17:30", end: "19:00", field: "p2" };
   const [sel, setSel] = useState(existing.days);
   const [start, setStart] = useState(existing.start);
   const [end, setEnd] = useState(existing.end);
   const [field, setField] = useState(existing.field);
+  const [zone, setZone] = useState("p2_voll");
+  const [seriesFrom, setSeriesFrom] = useState(dayKey(new Date()));
+  const [seriesTo, setSeriesTo] = useState(dayKey(addDays(new Date(), 84)));
   const [saved, setSaved] = useState(false);
+  const [sent, setSent] = useState(false);
   const toggle = (i) => setSel((s) => (s.includes(i) ? s.filter((x) => x !== i) : [...s, i].sort()));
+
+  const zones = fieldById(field).zones;
+  const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
+  const timeInvalid = !(start < end);
+
+  // Serien-Wunsch: pro gewähltem Wochentag eine Serie an den Platzwart senden
+  const sendAsSeries = () => {
+    if (timeInvalid || sel.length === 0) return;
+    sel.forEach((wd) => {
+      addWish({ team: trainerTeam, field, zone: safeZone, start, end, note: "aus Trainingstagen", recur: { weekday: wd, from: seriesFrom, to: seriesTo } });
+    });
+    setSent(true); setTimeout(() => setSent(false), 2500);
+  };
+
   return (
     <div>
-      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>Melde die regelmäßigen Trainingstage für <b>{teamById(trainerTeam)?.name}</b>. Der Platzwart nutzt sie als Grundlage für den Jahresplan.</p>
+      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>Melde die regelmäßigen Trainingstage für <b>{teamById(trainerTeam)?.name}</b>. Du kannst sie als Info speichern oder direkt als wiederkehrenden Wunsch an den Platzwart senden.</p>
       {existing.status === "abgelehnt" && (
         <div style={S.warnBanner}>
           ✕ Der Platzwart hat diese Trainingstage abgelehnt{existing.reason ? `: ${existing.reason}` : ""}. Du kannst sie anpassen und erneut speichern.
@@ -850,16 +887,44 @@ function TrainDaysForm({ trainerTeam, trainDays, saveTrainDay }) {
       <div style={S.formGrid}>
         <Field label="Von"><input type="time" value={start} onChange={(e) => setStart(e.target.value)} style={S.select} /></Field>
         <Field label="Bis"><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} style={S.select} /></Field>
-        <Field label="Bevorzugter Platz">
-          <select value={field} onChange={(e) => setField(e.target.value)} style={S.select}>
+        <Field label="Platz">
+          <select value={field} onChange={(e) => { setField(e.target.value); setZone(fieldById(e.target.value).zones[0].id); }} style={S.select}>
             {FIELDS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
           </select>
         </Field>
+        <Field label="Zone">
+          <select value={safeZone} onChange={(e) => setZone(e.target.value)} style={S.select}>
+            {zones.map((z) => <option key={z.id} value={z.id}>{z.label}</option>)}
+          </select>
+        </Field>
       </div>
+
+      {timeInvalid && <div style={S.warnBanner}>⚠️ Die Endzeit muss nach der Startzeit liegen.</div>}
+
       <button style={S.primaryBtn} onClick={() => { saveTrainDay(trainerTeam, { days: sel, start, end, field, status: "offen", reason: "" }); setSaved(true); setTimeout(() => setSaved(false), 2000); }}>
         Trainingstage speichern
       </button>
       {saved && <span style={{ marginLeft: 10, color: C.ok, fontSize: 13 }}>✓ gespeichert</span>}
+
+      <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
+        <div style={S.subHead}>Als wiederkehrenden Wunsch senden</div>
+        <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
+          Sendet für jeden oben gewählten Wochentag eine Serie an den Platzwart (er prüft Konflikte und nimmt an).
+        </p>
+        <div style={S.formGrid}>
+          <Field label="Ab Datum"><input type="date" value={seriesFrom} onChange={(e) => setSeriesFrom(e.target.value)} style={S.select} /></Field>
+          <Field label="Bis Datum"><input type="date" value={seriesTo} onChange={(e) => setSeriesTo(e.target.value)} style={S.select} /></Field>
+        </div>
+        {sel.length === 0 && <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>Bitte oben mindestens einen Wochentag wählen.</div>}
+        <button
+          style={{ ...S.primaryBtn, ...((timeInvalid || sel.length === 0) ? S.btnDisabled : {}) }}
+          onClick={sendAsSeries}
+          disabled={timeInvalid || sel.length === 0}
+        >
+          Als Serien-Wunsch an Platzwart senden
+        </button>
+        {sent && <span style={{ marginLeft: 10, color: C.ok, fontSize: 13 }}>✓ gesendet ({sel.length} Serie(n))</span>}
+      </div>
     </div>
   );
 }

@@ -29,20 +29,25 @@ function useCollection(name) {
 
 export function useBookings() {
   const { items, ready } = useCollection("bookings");
-  // Eindeutige, inhaltsbasierte ID: identische Belegung kann nicht doppelt entstehen.
-  // Ein zweiter (versehentlicher) Schreibvorgang trifft dasselbe Dokument.
-  const bookingId = (b) =>
+  // Inhaltsbasierte ID für direkte Einzelbelegungen des Platzwarts:
+  // schützt vor versehentlichem Doppelklick (identischer Eintrag -> dasselbe Dokument).
+  const contentId = (b) =>
     [b.date, b.field, b.zone, b.team, b.start, b.end, b.kind || "training"]
       .join("_")
       .replace(/[^A-Za-z0-9_:-]/g, "");
+  // Eindeutige ID (für Anträge und Serien): mehrere Einträge kollidieren nie.
+  const uniqueId = () => `b-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // Welche ID ein Eintrag bekommt: Anträge und Serienteile immer eindeutig,
+  // direkte Einzelbelegungen inhaltsbasiert (Doppelklick-Schutz).
+  const idFor = (b) => (b.status === "beantragt" || b.seriesId ? uniqueId() : contentId(b));
   return {
     bookings: items,
     bookingsReady: ready,
-    addBooking: (b) => setDoc(doc(db, "bookings", bookingId(b)), b),
+    addBooking: (b) => setDoc(doc(db, "bookings", idFor(b)), b),
     // Mehrere Belegungen einer Serie auf einmal schreiben (gemeinsame seriesId)
     addBookingSeries: async (entries) => {
       const batch = writeBatch(db);
-      entries.forEach((e) => batch.set(doc(db, "bookings", bookingId(e)), e));
+      entries.forEach((e) => batch.set(doc(db, "bookings", uniqueId()), e));
       await batch.commit();
     },
     // Status eines Antrags ändern (z. B. "frei" = freigegeben)
@@ -53,10 +58,11 @@ export function useBookings() {
       allBookings.filter((b) => b.seriesId === seriesId).forEach((b) => batch.update(doc(db, "bookings", b.id), { status: "frei" }));
       await batch.commit();
     },
-    // Einen Termin verschieben: alten Datensatz löschen, neuen mit neuer ID anlegen
+    // Einen Termin verschieben: neuen Datensatz mit eindeutiger ID anlegen, alten löschen
     moveBooking: async (oldId, newData) => {
-      await setDoc(doc(db, "bookings", bookingId(newData)), newData);
-      if (bookingId(newData) !== oldId) await deleteDoc(doc(db, "bookings", oldId));
+      const { id, ...clean } = newData;
+      await setDoc(doc(db, "bookings", uniqueId()), clean);
+      await deleteDoc(doc(db, "bookings", oldId));
     },
     removeBooking: (id) => deleteDoc(doc(db, "bookings", id)),
     // Ganze Serie anhand der seriesId entfernen

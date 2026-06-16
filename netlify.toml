@@ -10,4 +10,3 @@
 
 [build.environment]
   NODE_VERSION = "20"
-# build neu ausloesen

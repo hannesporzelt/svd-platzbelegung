@@ -668,7 +668,10 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
   const timeInvalid = !(start < end);
 
   // Konfliktvorschau nur im Einzelmodus (Serie prüft beim Speichern jeden Termin)
-  const allDayEntries = [...autoTrainingForDay(new Date(date + "T12:00")), ...(bookingsByDay[date] || [])];
+  const allDayEntries = [
+    ...autoTrainingForDay(new Date(date + "T12:00")),
+    ...((bookingsByDay[date] || []).filter((b) => b.status !== "beantragt")),
+  ];
   const liveConflicts = mode === "single" && !timeInvalid
     ? findConflicts({ id: "__neu__", field, zone: safeZone, team, start, end, kind }, allDayEntries)
     : [];
@@ -695,7 +698,7 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
     // Jeden Termin auf Konflikte prüfen
     const conflictDays = [];
     seriesDates.forEach((dk) => {
-      const existing = [...autoTrainingForDay(new Date(dk + "T12:00")), ...(bookingsByDay[dk] || [])];
+      const existing = [...autoTrainingForDay(new Date(dk + "T12:00")), ...((bookingsByDay[dk] || []).filter((b) => b.status !== "beantragt"))];
       const c = findConflicts({ id: "__neu__", field, zone: safeZone, team, start, end, kind }, existing);
       if (c.length > 0) conflictDays.push(dk);
     });
@@ -725,7 +728,7 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
     }
   };
 
-  const dayEntries = (bookingsByDay[date] || []).filter((e) => e.field === field);
+  const dayEntries = (bookingsByDay[date] || []).filter((e) => e.field === field && e.status !== "beantragt");
 
   return (
     <div>
@@ -770,8 +773,8 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
       {timeInvalid && <div style={S.warnBanner}>⚠️ Die Endzeit muss nach der Startzeit liegen.</div>}
       {mode === "single" && !timeInvalid && liveConflicts.length > 0 && (
         <div style={S.warnBanner}>
-          ⚠️ Doppelbelegung: {fieldById(field)?.name} ist {start}–{end} schon belegt durch{" "}
-          {liveConflicts.map((c) => `${teamById(c.team)?.name || c.team}${c.auto ? " (fix)" : ""}`).join(", ")}. Eintragen ist möglich, wird aber nachgefragt.
+          ⚠️ Doppelbelegung: {fieldById(field)?.name} ({zoneText(field, safeZone)}) ist {start}–{end} schon belegt durch{" "}
+          {liveConflicts.map((c) => `${teamById(c.team)?.name || c.team} (${zoneText(c.field, c.zone)})${c.auto ? " – fix" : ""}`).join(", ")}. Eintragen ist möglich, wird aber nachgefragt.
         </div>
       )}
       {mode === "series" && !timeInvalid && (
@@ -1056,13 +1059,16 @@ function TrainerBookingForm({ trainerTeam, bookings, bookingsByDay, addBooking, 
   const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
   const timeInvalid = !(start < end);
 
-  const allDayEntries = [...autoTrainingForDay(new Date(date + "T12:00")), ...(bookingsByDay[date] || [])];
+  const allDayEntries = [
+    ...autoTrainingForDay(new Date(date + "T12:00")),
+    ...((bookingsByDay[date] || []).filter((b) => b.status !== "beantragt")),
+  ];
   const liveConflicts = mode === "single" && !timeInvalid
     ? findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, allDayEntries)
     : [];
   const seriesDates = mode === "series" ? expandRecurrence(seriesFrom, seriesTo, weekday) : [];
   const seriesConflicts = mode === "series" && !timeInvalid
-    ? seriesDates.filter((dk) => findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, entriesForDay(new Date(dk + "T12:00"))).length > 0)
+    ? seriesDates.filter((dk) => findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, [...autoTrainingForDay(new Date(dk + "T12:00")), ...((bookingsByDay[dk] || []).filter((b) => b.status !== "beantragt"))]).length > 0)
     : [];
 
   const flash = () => { setSaved(true); setTimeout(() => setSaved(false), 2500); };
@@ -1135,7 +1141,7 @@ function TrainerBookingForm({ trainerTeam, bookings, bookingsByDay, addBooking, 
       {timeInvalid && <div style={S.warnBanner}>⚠️ Die Endzeit muss nach der Startzeit liegen.</div>}
       {mode === "single" && !timeInvalid && liveConflicts.length > 0 && (
         <div style={S.warnBanner}>
-          ⚠️ {fieldById(field)?.name} ist {start}–{end} schon belegt durch {liveConflicts.map((c) => teamById(c.team)?.name || c.team).join(", ")}. Eintragen ist möglich, wird aber nachgefragt.
+          ⚠️ {fieldById(field)?.name} ({zoneText(field, safeZone)}) ist {start}–{end} schon belegt durch {liveConflicts.map((c) => `${teamById(c.team)?.name || c.team} (${zoneText(c.field, c.zone)})`).join(", ")}. Eintragen ist möglich, wird aber nachgefragt.
         </div>
       )}
       {mode === "series" && !timeInvalid && (

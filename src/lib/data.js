@@ -45,6 +45,19 @@ export function useBookings() {
       entries.forEach((e) => batch.set(doc(db, "bookings", bookingId(e)), e));
       await batch.commit();
     },
+    // Status eines Antrags ändern (z. B. "frei" = freigegeben)
+    setBookingStatus: (id, status) => updateDoc(doc(db, "bookings", id), { status }),
+    // Alle Einträge einer Serie freigeben
+    approveSeries: async (seriesId, allBookings) => {
+      const batch = writeBatch(db);
+      allBookings.filter((b) => b.seriesId === seriesId).forEach((b) => batch.update(doc(db, "bookings", b.id), { status: "frei" }));
+      await batch.commit();
+    },
+    // Einen Termin verschieben: alten Datensatz löschen, neuen mit neuer ID anlegen
+    moveBooking: async (oldId, newData) => {
+      await setDoc(doc(db, "bookings", bookingId(newData)), newData);
+      if (bookingId(newData) !== oldId) await deleteDoc(doc(db, "bookings", oldId));
+    },
     removeBooking: (id) => deleteDoc(doc(db, "bookings", id)),
     // Ganze Serie anhand der seriesId entfernen
     removeSeries: async (seriesId, allBookings) => {

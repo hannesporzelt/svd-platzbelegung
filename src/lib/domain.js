@@ -13,9 +13,11 @@ export const TEAMS = [
   { id: "u13", name: "U13", color: "#6d28d9" },
   { id: "u13_2", name: "U13/2", color: "#c026d3" },
   { id: "u13_3", name: "U13/3", color: "#0369a1" },
-  { id: "u11", name: "U11", color: "#be185d" },
+  { id: "u13_w", name: "U13 w", color: "#e11d8f" },
+  { id: "u11", name: "U11", color: "#9d174d" },
   { id: "u9", name: "U9", color: "#a16207" },
   { id: "u7", name: "U7", color: "#7c2d12" },
+  { id: "turnier", name: "Turnier", color: "#1e293b" },
 ];
 export const teamById = (id) => TEAMS.find((t) => t.id === id);
 

@@ -186,10 +186,10 @@ export default function App() {
       {view === "trainer" && (
         <TrainerPanel
           trainerTeam={trainerTeam}
-          wishes={wishes}
-          addWish={addWish}
-          trainDays={trainDays}
-          saveTrainDay={saveTrainDay}
+          bookings={bookings}
+          bookingsByDay={bookingsByDay}
+          addBooking={addBooking}
+          addBookingSeries={addBookingSeries}
           entriesForDay={entriesForDay}
           addMessage={addMessage}
           messages={messages}
@@ -198,9 +198,7 @@ export default function App() {
 
       {view === "viewer" && (
         <div style={{ ...S.card, marginTop: "1rem", color: C.textSec, fontSize: 14 }}>
-          Lesemodus. Trainer können ohne Anmeldung Trainingstage melden und Wünsche äußern;
-          Konflikte werden dabei sofort angezeigt. Der Platzwart pflegt Belegungen, Heimspiele und
-          Sperren und löst gemeldete Konflikte.
+          Lesemodus. Trainer können ohne Anmeldung Trainingstage direkt eintragen (einzeln oder wiederkehrend); sie erscheinen sofort im Kalender. Der Platzwart pflegt Belegungen, Heimspiele und Sperren und kann Einträge anpassen oder löschen.
         </div>
       )}
 
@@ -940,18 +938,146 @@ function WishInbox({ wishes, setWishStatus, addBooking, addBookingSeries, bookin
 }
 
 /* ---------------- Trainer ---------------- */
-function TrainerPanel({ trainerTeam, wishes, addWish, trainDays, saveTrainDay, entriesForDay, addMessage, messages }) {
-  const [tab, setTab] = useState("trainingstage");
+function TrainerPanel({ trainerTeam, bookings, bookingsByDay, addBooking, addBookingSeries, entriesForDay, addMessage, messages }) {
+  const [tab, setTab] = useState("eintragen");
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
       <div style={S.adminTabs}>
-        {[["trainingstage", "Normale Trainingstage"], ["wunsch", "Wunsch äußern"], ["nachricht", "Nachricht an Platzwart"]].map(([k, l]) => (
+        {[["eintragen", "Trainingstag eintragen"], ["nachricht", "Nachricht an Platzwart"]].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...S.tab, ...(tab === k ? S.tabActive : {}) }}>{l}</button>
         ))}
       </div>
-      {tab === "trainingstage" && <TrainDaysForm trainerTeam={trainerTeam} trainDays={trainDays} saveTrainDay={saveTrainDay} addWish={addWish} entriesForDay={entriesForDay} />}
-      {tab === "wunsch" && <WishForm trainerTeam={trainerTeam} addWish={addWish} wishes={wishes} entriesForDay={entriesForDay} />}
+      {tab === "eintragen" && <TrainerBookingForm trainerTeam={trainerTeam} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} entriesForDay={entriesForDay} />}
       {tab === "nachricht" && <MessageForm trainerTeam={trainerTeam} addMessage={addMessage} messages={messages} />}
+    </div>
+  );
+}
+
+// Trainer trägt Trainingstage direkt ein (Einzeltermin mit Datum oder Serie).
+// Erscheint sofort im Kalender; der Platzwart kann später löschen.
+function TrainerBookingForm({ trainerTeam, bookings, bookingsByDay, addBooking, addBookingSeries, entriesForDay }) {
+  const [mode, setMode] = useState("single"); // single | series
+  const [date, setDate] = useState(dayKey(addDays(new Date(), 1)));
+  const [weekday, setWeekday] = useState(1);
+  const [seriesFrom, setSeriesFrom] = useState(dayKey(addDays(new Date(), 1)));
+  const [seriesTo, setSeriesTo] = useState(dayKey(addDays(new Date(), 84)));
+  const [field, setField] = useState("p2");
+  const [zone, setZone] = useState("p2_voll");
+  const [start, setStart] = useState("17:30");
+  const [end, setEnd] = useState("19:00");
+  const [saved, setSaved] = useState(false);
+  const savingRef = useRef(false);
+
+  const zones = fieldById(field).zones;
+  const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
+  const timeInvalid = !(start < end);
+
+  const allDayEntries = [...autoTrainingForDay(new Date(date + "T12:00")), ...(bookingsByDay[date] || [])];
+  const liveConflicts = mode === "single" && !timeInvalid
+    ? findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, allDayEntries)
+    : [];
+  const seriesDates = mode === "series" ? expandRecurrence(seriesFrom, seriesTo, weekday) : [];
+  const seriesConflicts = mode === "series" && !timeInvalid
+    ? seriesDates.filter((dk) => findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, entriesForDay(new Date(dk + "T12:00"))).length > 0)
+    : [];
+
+  const flash = () => { setSaved(true); setTimeout(() => setSaved(false), 2500); };
+
+  const submit = () => {
+    if (timeInvalid) return;
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try {
+      if (mode === "series") {
+        if (seriesDates.length === 0) { window.alert("Kein Termin im gewählten Zeitraum."); return; }
+        if (seriesConflicts.length > 0 && !window.confirm(`${CONFLICT_HINT}\n\n(${seriesConflicts.length} von ${seriesDates.length} Terminen betroffen)`)) return;
+        const seriesId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        addBookingSeries(seriesDates.map((dk) => ({ date: dk, field, zone: safeZone, team: trainerTeam, start, end, kind: "training", seriesId })));
+      } else {
+        if (liveConflicts.length > 0 && !window.confirm(CONFLICT_HINT)) return;
+        addBooking({ date, field, zone: safeZone, team: trainerTeam, start, end, kind: "training" });
+      }
+      flash();
+    } finally {
+      setTimeout(() => { savingRef.current = false; }, 800);
+    }
+  };
+
+  // eigene kommende Einträge
+  const todayKey = dayKey(new Date());
+  const mine = bookings
+    .filter((b) => b.team === trainerTeam && b.date >= todayKey)
+    .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start))
+    .slice(0, 8);
+
+  return (
+    <div>
+      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>
+        Trage Trainingstage für <b>{teamById(trainerTeam)?.name}</b> ein – einzeln mit Datum oder wiederkehrend. Sie erscheinen sofort im Kalender; der Platzwart kann sie bei Bedarf anpassen oder löschen.
+      </p>
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        <button onClick={() => setMode("single")} style={{ ...S.tab, ...(mode === "single" ? S.tabActive : {}) }}>Einzeltermin</button>
+        <button onClick={() => setMode("series")} style={{ ...S.tab, ...(mode === "series" ? S.tabActive : {}) }}>Wiederkehrend</button>
+      </div>
+
+      <div style={S.formGrid}>
+        {mode === "single" ? (
+          <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={S.select} /></Field>
+        ) : (
+          <>
+            <Field label="Wochentag">
+              <select value={weekday} onChange={(e) => setWeekday(Number(e.target.value))} style={S.select}>
+                {WEEKDAYS_LONG.map((d, i) => <option key={i} value={i}>{d}</option>)}
+              </select>
+            </Field>
+            <Field label="Ab Datum"><input type="date" value={seriesFrom} onChange={(e) => setSeriesFrom(e.target.value)} style={S.select} /></Field>
+            <Field label="Bis Datum"><input type="date" value={seriesTo} onChange={(e) => setSeriesTo(e.target.value)} style={S.select} /></Field>
+          </>
+        )}
+        <Field label="Platz">
+          <select value={field} onChange={(e) => { setField(e.target.value); setZone(fieldById(e.target.value).zones[0].id); }} style={S.select}>
+            {FIELDS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Zone">
+          <select value={safeZone} onChange={(e) => setZone(e.target.value)} style={S.select}>
+            {zones.map((z) => <option key={z.id} value={z.id}>{z.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Von"><input type="time" value={start} onChange={(e) => setStart(e.target.value)} style={S.select} /></Field>
+        <Field label="Bis"><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} style={S.select} /></Field>
+      </div>
+
+      {timeInvalid && <div style={S.warnBanner}>⚠️ Die Endzeit muss nach der Startzeit liegen.</div>}
+      {mode === "single" && !timeInvalid && liveConflicts.length > 0 && (
+        <div style={S.warnBanner}>
+          ⚠️ {fieldById(field)?.name} ist {start}–{end} schon belegt durch {liveConflicts.map((c) => teamById(c.team)?.name || c.team).join(", ")}. Eintragen ist möglich, wird aber nachgefragt.
+        </div>
+      )}
+      {mode === "series" && !timeInvalid && (
+        <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>
+          {seriesDates.length} {WEEKDAYS_LONG[weekday]}-Termine im Zeitraum.{seriesConflicts.length > 0 ? ` ⚠️ ${seriesConflicts.length} davon bereits belegt.` : ""}
+        </div>
+      )}
+
+      <button style={{ ...S.primaryBtn, ...(timeInvalid ? S.btnDisabled : {}) }} onClick={submit} disabled={timeInvalid}>
+        {mode === "series" ? "Serie eintragen" : "Trainingstag eintragen"}
+      </button>
+      {saved && <span style={{ marginLeft: 10, color: C.ok, fontSize: 13 }}>✓ im Kalender eingetragen</span>}
+
+      {mine.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={S.subHead}>Meine kommenden Trainingstage</div>
+          {mine.map((b) => {
+            const d = new Date(b.date + "T12:00");
+            return (
+              <div key={b.id} style={S.listRow}>
+                <span>{WEEKDAYS[(d.getDay() + 6) % 7]} {d.getDate()}.{d.getMonth() + 1}. · {fieldById(b.field)?.name} · {b.start}–{b.end}{b.seriesId ? " · Serie" : ""}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -989,226 +1115,6 @@ function MessageForm({ trainerTeam, addMessage, messages }) {
             <div key={m.id} style={S.listRow}>
               <span>{m.text}</span>
               <span style={{ fontSize: 12, color: m.done ? C.ok : C.textSec }}>{m.done ? "✓ erledigt" : "offen"}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TrainDaysForm({ trainerTeam, trainDays, saveTrainDay, addWish, entriesForDay }) {
-  const existing = trainDays[trainerTeam] || { days: [], start: "17:30", end: "19:00", field: "p2" };
-  const [sel, setSel] = useState(existing.days);
-  const [start, setStart] = useState(existing.start);
-  const [end, setEnd] = useState(existing.end);
-  const [field, setField] = useState(existing.field);
-  const [zone, setZone] = useState("p2_voll");
-  const [seriesFrom, setSeriesFrom] = useState(dayKey(new Date()));
-  const [seriesTo, setSeriesTo] = useState(dayKey(addDays(new Date(), 84)));
-  const [saved, setSaved] = useState(false);
-  const [sent, setSent] = useState(false);
-  const toggle = (i) => setSel((s) => (s.includes(i) ? s.filter((x) => x !== i) : [...s, i].sort()));
-
-  const zones = fieldById(field).zones;
-  const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
-  const timeInvalid = !(start < end);
-
-  // Konfliktvorschau: prüft alle gewählten Wochentage über die Datumsspanne
-  const seriesConflictCount = (() => {
-    if (timeInvalid || sel.length === 0) return 0;
-    let n = 0;
-    sel.forEach((wd) => {
-      expandRecurrence(seriesFrom, seriesTo, wd).forEach((dk) => {
-        const existing = entriesForDay(new Date(dk + "T12:00"));
-        if (findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, existing).length > 0) n++;
-      });
-    });
-    return n;
-  })();
-
-  // Serien-Wunsch: pro gewähltem Wochentag eine Serie an den Platzwart senden
-  const sendAsSeries = () => {
-    if (timeInvalid || sel.length === 0) return;
-    if (seriesConflictCount > 0) {
-      if (!window.confirm(`${CONFLICT_HINT}\n\n(${seriesConflictCount} Termin(e) betroffen)`)) return;
-    }
-    sel.forEach((wd) => {
-      addWish({ team: trainerTeam, field, zone: safeZone, start, end, note: "aus Trainingstagen", recur: { weekday: wd, from: seriesFrom, to: seriesTo } });
-    });
-    setSent(true); setTimeout(() => setSent(false), 2500);
-  };
-
-  return (
-    <div>
-      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>Melde die regelmäßigen Trainingstage für <b>{teamById(trainerTeam)?.name}</b>. Du kannst sie als Info speichern oder direkt als wiederkehrenden Wunsch an den Platzwart senden.</p>
-      {existing.status === "abgelehnt" && (
-        <div style={S.warnBanner}>
-          ✕ Der Platzwart hat diese Trainingstage abgelehnt{existing.reason ? `: ${existing.reason}` : ""}. Du kannst sie anpassen und erneut speichern.
-        </div>
-      )}
-      {existing.status === "bestaetigt" && (
-        <div style={{ ...S.warnBanner, background: "#e1f5ee", color: C.ok, border: "1px solid #9fd8c5" }}>
-          ✓ Diese Trainingstage wurden vom Platzwart bestätigt.
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-        {WEEKDAYS_LONG.map((d, i) => (
-          <button key={i} onClick={() => toggle(i)} style={{ ...S.dayPick, ...(sel.includes(i) ? S.dayPickActive : {}) }}>{d}</button>
-        ))}
-      </div>
-      <div style={S.formGrid}>
-        <Field label="Von"><input type="time" value={start} onChange={(e) => setStart(e.target.value)} style={S.select} /></Field>
-        <Field label="Bis"><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} style={S.select} /></Field>
-        <Field label="Platz">
-          <select value={field} onChange={(e) => { setField(e.target.value); setZone(fieldById(e.target.value).zones[0].id); }} style={S.select}>
-            {FIELDS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
-        </Field>
-        <Field label="Zone">
-          <select value={safeZone} onChange={(e) => setZone(e.target.value)} style={S.select}>
-            {zones.map((z) => <option key={z.id} value={z.id}>{z.label}</option>)}
-          </select>
-        </Field>
-      </div>
-
-      {timeInvalid && <div style={S.warnBanner}>⚠️ Die Endzeit muss nach der Startzeit liegen.</div>}
-
-      <button style={S.primaryBtn} onClick={() => { saveTrainDay(trainerTeam, { days: sel, start, end, field, status: "offen", reason: "" }); setSaved(true); setTimeout(() => setSaved(false), 2000); }}>
-        Trainingstage speichern
-      </button>
-      {saved && <span style={{ marginLeft: 10, color: C.ok, fontSize: 13 }}>✓ gespeichert</span>}
-
-      <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
-        <div style={S.subHead}>Als wiederkehrenden Wunsch senden</div>
-        <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
-          Sendet für jeden oben gewählten Wochentag eine Serie an den Platzwart (er prüft Konflikte und nimmt an).
-        </p>
-        <div style={S.formGrid}>
-          <Field label="Ab Datum"><input type="date" value={seriesFrom} onChange={(e) => setSeriesFrom(e.target.value)} style={S.select} /></Field>
-          <Field label="Bis Datum"><input type="date" value={seriesTo} onChange={(e) => setSeriesTo(e.target.value)} style={S.select} /></Field>
-        </div>
-        {sel.length === 0 && <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>Bitte oben mindestens einen Wochentag wählen.</div>}
-        {sel.length > 0 && seriesConflictCount > 0 && (
-          <div style={S.warnBanner}>
-            ⚠️ An {seriesConflictCount} Termin(en) im gewählten Zeitraum ist {fieldById(field)?.name} bereits belegt. Du kannst den Wunsch trotzdem senden – der Platzwart entscheidet.
-          </div>
-        )}
-        <button
-          style={{ ...S.primaryBtn, ...((timeInvalid || sel.length === 0) ? S.btnDisabled : {}) }}
-          onClick={sendAsSeries}
-          disabled={timeInvalid || sel.length === 0}
-        >
-          Als Serien-Wunsch an Platzwart senden
-        </button>
-        {sent && <span style={{ marginLeft: 10, color: C.ok, fontSize: 13 }}>✓ gesendet ({sel.length} Serie(n))</span>}
-      </div>
-    </div>
-  );
-}
-
-function WishForm({ trainerTeam, addWish, wishes, entriesForDay }) {
-  const [mode, setMode] = useState("single"); // single | series
-  const [date, setDate] = useState(dayKey(addDays(new Date(), 1)));
-  const [weekday, setWeekday] = useState(1);
-  const [seriesFrom, setSeriesFrom] = useState(dayKey(addDays(new Date(), 1)));
-  const [seriesTo, setSeriesTo] = useState(dayKey(addDays(new Date(), 84)));
-  const [field, setField] = useState("p2");
-  const [zone, setZone] = useState("v1");
-  const [start, setStart] = useState("17:30");
-  const [end, setEnd] = useState("19:00");
-  const [note, setNote] = useState("");
-  const [sent, setSent] = useState(false);
-  const zones = fieldById(field).zones;
-  const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
-
-  const timeInvalid = !(start < end);
-  const existingDay = entriesForDay(new Date(date + "T12:00"));
-  const liveConflicts = mode === "single" && !timeInvalid
-    ? findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, existingDay)
-    : [];
-  const seriesDates = mode === "series" ? expandRecurrence(seriesFrom, seriesTo, weekday) : [];
-  const seriesConflicts = mode === "series" && !timeInvalid
-    ? seriesDates.filter((dk) => findConflicts({ id: "__neu__", field, zone: safeZone, team: trainerTeam, start, end }, entriesForDay(new Date(dk + "T12:00"))).length > 0)
-    : [];
-
-  const send = () => {
-    if (timeInvalid) return;
-    if (mode === "series") {
-      if (seriesDates.length === 0) { window.alert("Kein Termin im gewählten Zeitraum."); return; }
-      if (seriesConflicts.length > 0 && !window.confirm(`${CONFLICT_HINT}\n\n(${seriesConflicts.length} von ${seriesDates.length} Terminen betroffen)`)) return;
-      addWish({ team: trainerTeam, field, zone: safeZone, start, end, note, recur: { weekday, from: seriesFrom, to: seriesTo } });
-    } else {
-      if (liveConflicts.length > 0 && !window.confirm(CONFLICT_HINT)) return;
-      addWish({ team: trainerTeam, date, field, zone: safeZone, start, end, note });
-    }
-    setNote(""); setSent(true); setTimeout(() => setSent(false), 2000);
-  };
-  const mine = wishes.filter((w) => w.team === trainerTeam).slice(-6).reverse();
-
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-        <button onClick={() => setMode("single")} style={{ ...S.tab, ...(mode === "single" ? S.tabActive : {}) }}>Einzeltermin</button>
-        <button onClick={() => setMode("series")} style={{ ...S.tab, ...(mode === "series" ? S.tabActive : {}) }}>Wiederkehrend</button>
-      </div>
-
-      <div style={S.formGrid}>
-        {mode === "single" ? (
-          <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={S.select} /></Field>
-        ) : (
-          <>
-            <Field label="Wochentag">
-              <select value={weekday} onChange={(e) => setWeekday(Number(e.target.value))} style={S.select}>
-                {WEEKDAYS_LONG.map((d, i) => <option key={i} value={i}>{d}</option>)}
-              </select>
-            </Field>
-            <Field label="Ab Datum"><input type="date" value={seriesFrom} onChange={(e) => setSeriesFrom(e.target.value)} style={S.select} /></Field>
-            <Field label="Bis Datum"><input type="date" value={seriesTo} onChange={(e) => setSeriesTo(e.target.value)} style={S.select} /></Field>
-          </>
-        )}
-        <Field label="Platz">
-          <select value={field} onChange={(e) => { setField(e.target.value); setZone(fieldById(e.target.value).zones[0].id); }} style={S.select}>
-            {FIELDS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
-        </Field>
-        <Field label="Zone">
-          <select value={safeZone} onChange={(e) => setZone(e.target.value)} style={S.select}>
-            {zones.map((z) => <option key={z.id} value={z.id}>{z.label}</option>)}
-          </select>
-        </Field>
-        <Field label="Von"><input type="time" value={start} onChange={(e) => setStart(e.target.value)} style={S.select} /></Field>
-        <Field label="Bis"><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} style={S.select} /></Field>
-        <Field label="Notiz"><input type="text" placeholder="optional" value={note} onChange={(e) => setNote(e.target.value)} style={S.select} /></Field>
-      </div>
-
-      {timeInvalid && <div style={S.warnBanner}>⚠️ Die Endzeit muss nach der Startzeit liegen.</div>}
-      {mode === "single" && !timeInvalid && liveConflicts.length > 0 && (
-        <div style={S.warnBanner}>
-          ⚠️ Achtung: {fieldById(field)?.name} ist zu dieser Zeit schon belegt durch{" "}
-          {liveConflicts.map((c) => `${teamById(c.team)?.name || c.team}${c.auto ? " (fix)" : ""}`).join(", ")}. Du kannst den Wunsch trotzdem absenden – der Platzwart entscheidet.
-        </div>
-      )}
-      {mode === "series" && !timeInvalid && (
-        <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>
-          Serien-Wunsch: <b>{seriesDates.length}</b> {WEEKDAYS_LONG[weekday]}-Termine. Der Platzwart prüft Konflikte beim Annehmen.
-        </div>
-      )}
-
-      <button style={{ ...S.primaryBtn, ...(timeInvalid ? S.btnDisabled : {}) }} onClick={send} disabled={timeInvalid}>
-        {mode === "series" ? "Serien-Wunsch absenden" : "Wunsch absenden"}
-      </button>
-      {sent && <span style={{ marginLeft: 10, color: C.ok, fontSize: 13 }}>✓ gesendet</span>}
-
-      {mine.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div style={S.subHead}>Meine letzten Wünsche</div>
-          {mine.map((w) => (
-            <div key={w.id} style={S.listRow}>
-              <span>{w.recur ? `jeden ${WEEKDAYS_LONG[w.recur.weekday]} (${w.recur.from}–${w.recur.to})` : w.date} · {fieldById(w.field)?.name} · {w.start}–{w.end}{w.status === "abgelehnt" && w.reason ? ` · Grund: ${w.reason}` : ""}</span>
-              <span style={{ fontSize: 12, color: w.status === "offen" ? C.textSec : w.status === "angenommen" ? C.ok : C.danger }}>
-                {w.status === "offen" ? "offen" : w.status === "angenommen" ? "✓ angenommen" : "✕ abgelehnt"}
-              </span>
             </div>
           ))}
         </div>

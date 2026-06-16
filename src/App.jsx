@@ -155,6 +155,8 @@ export default function App() {
           setMonthAnchor={setMonthAnchor}
           entriesForDay={entriesForDay}
           lockForDayField={lockForDayField}
+          isAdmin={isAdmin}
+          removeBooking={removeBooking}
         />
       )}
 
@@ -327,17 +329,17 @@ function Chip({ entry, conflict, isAdmin, removeBooking }) {
           {conflict && <span style={{ color: C.danger }}>⚠️ </span>}
           {t ? t.name : entry.team}
         </span>
-        <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          {zoneLabel && <span style={S.zoneBadge}>{zoneLabel}</span>}
-          {canDelete && (
-            <button onClick={del} title="Diesen Tag löschen"
-              style={{ border: "none", background: "transparent", color: C.danger, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "0 2px" }}>×</button>
-          )}
-        </span>
+        {zoneLabel && <span style={S.zoneBadge}>{zoneLabel}</span>}
       </div>
       <div style={{ fontSize: 11, color: C.textSec }}>
         {entry.start}–{entry.end}{entry.kind === "match" && " · Heimspiel"}{entry.kind === "turnier" && " · Turnier"}{entry.auto && " · fix"}
       </div>
+      {canDelete && (
+        <button onClick={del} title="Diesen Tag löschen"
+          style={{ marginTop: 5, width: "100%", border: `1px solid #e7a5a5`, background: "#fbeaea", color: C.danger, cursor: "pointer", fontSize: 11, fontWeight: 500, borderRadius: 6, padding: "3px 0" }}>
+          ✕ löschen
+        </button>
+      )}
     </div>
   );
 }
@@ -409,7 +411,7 @@ function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockFor
 /* ---------------- Monatsübersicht (druckbar) ---------------- */
 const MONTHS_LONG = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 
-function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField }) {
+function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField, isAdmin, removeBooking }) {
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
   const shiftMonth = (delta) => { const d = new Date(year, month + delta, 1); setMonthAnchor(d); };
@@ -426,6 +428,14 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
   const fieldShort = { p1: "P1", p2: "P2", p3: "P3" };
   const zoneShort = { p2_voll: "ganz", h_ob: "Ob", h_ha: "Ha", v1: "V1", v2: "V2", v3: "V3", v4: "V4", h1: "H1", h2: "H2", voll: "" };
 
+  const delEntry = (e) => {
+    if (e.auto || !e.id) return;
+    const d = new Date(e.date + "T12:00");
+    if (window.confirm(`Belegung löschen?\n\n${teamById(e.team)?.name || e.team} · ${d.getDate()}.${d.getMonth() + 1}. · ${e.start}–${e.end}`)) {
+      removeBooking(e.id);
+    }
+  };
+
   return (
     <div style={S.card} className="print-area">
       <div style={S.gridHead}>
@@ -436,6 +446,7 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
         </div>
         <span style={{ fontSize: 18 }}>{MONTHS_LONG[month]} {year}</span>
       </div>
+      {isAdmin && <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }} className="no-print">Als Platzwart auf einen Eintrag tippen, um ihn zu löschen.</p>}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
         {WEEKDAYS.map((w) => (
@@ -457,11 +468,16 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 {entries.slice(0, 5).map((e) => {
                   const t = teamById(e.team);
+                  const deletable = isAdmin && removeBooking && !e.auto && e.id;
                   return (
-                    <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, lineHeight: 1.2 }}>
+                    <div key={e.id}
+                      onClick={deletable ? () => delEntry(e) : undefined}
+                      title={deletable ? "Löschen" : undefined}
+                      style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, lineHeight: 1.2, cursor: deletable ? "pointer" : "default" }}>
                       <span style={{ width: 7, height: 7, borderRadius: 2, background: t ? t.color : C.textSec, flex: "none" }} />
                       <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {e.start} {t ? t.name : e.team} <span style={{ color: C.textSec }}>{fieldShort[e.field]}{zoneShort[e.zone] ? "·" + zoneShort[e.zone] : ""}</span>
+                        {deletable && <span className="no-print" style={{ color: C.danger }}> ✕</span>}
                       </span>
                     </div>
                   );

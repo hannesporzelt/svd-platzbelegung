@@ -815,6 +815,7 @@ function LockForm({ locks, addLock, removeLock }) {
 }
 
 function TrainDayApproval({ bookings, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, addMessage }) {
+  const [moveTarget, setMoveTarget] = useState(null); // die zu verschiebende Belegung
   const todayKey = dayKey(new Date());
   const pending = bookings
     .filter((b) => b.status === "beantragt" && b.date >= todayKey)
@@ -845,25 +846,21 @@ function TrainDayApproval({ bookings, setBookingStatus, approveSeries, moveBooki
     removeSeries(sid, bookings);
   };
 
-  const move = (b) => {
-    const neuDatum = window.prompt(`Neues Datum für ${teamById(b.team)?.name} (JJJJ-MM-TT):`, b.date);
-    if (!neuDatum) return;
-    const neuStart = window.prompt("Neue Startzeit (HH:MM):", b.start);
-    if (!neuStart) return;
-    const neuEnd = window.prompt("Neue Endzeit (HH:MM):", b.end);
-    if (!neuEnd) return;
-    if (!(neuStart < neuEnd)) { window.alert("Endzeit muss nach Startzeit liegen."); return; }
-    const neu = { date: neuDatum, field: b.field, zone: b.zone, team: b.team, start: neuStart, end: neuEnd, kind: "training", status: "frei" };
-    moveBooking(b.id, neu);
-    addMessage({ team: b.team, dir: "out", text: `${teamById(b.team)?.name} wurde verschoben auf ${fmtDate(neuDatum)} ${neuStart}–${neuEnd}, bitte prüfen.` });
+  const move = (b) => setMoveTarget(b);
+
+  const doMove = (b, neu) => {
+    moveBooking(b.id, { ...neu, team: b.team, kind: "training", status: "frei" });
+    addMessage({ team: b.team, dir: "out", text: `${teamById(b.team)?.name} wurde verschoben auf ${fmtDate(neu.date)} ${neu.start}–${neu.end} (${fieldById(neu.field)?.name}, ${zoneText(neu.field, neu.zone)}), bitte prüfen.` });
+    setMoveTarget(null);
   };
 
   const empty = singles.length === 0 && Object.keys(seriesMap).length === 0;
 
   return (
     <div>
+      {moveTarget && <MoveDialog entry={moveTarget} onCancel={() => setMoveTarget(null)} onSave={doMove} />}
       <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>
-        Von Trainern beantragte Trainingstage. Erst nach <b>Freigabe</b> erscheinen sie im Kalender. Du kannst einzelne Termine auch <b>verschieben</b> – der Trainer bekommt dann eine Nachricht.
+        Von Trainern beantragte Trainingstage. Erst nach <b>Freigabe</b> erscheinen sie im Kalender. Du kannst einzelne Termine auch <b>verschieben</b> (Datum, Zeit, Platz und Einteilung) – der Trainer bekommt dann eine Nachricht.
       </p>
       {empty && <p style={{ color: C.textSec, fontSize: 14 }}>Keine offenen Anträge.</p>}
 
@@ -913,6 +910,47 @@ function TrainDayApproval({ bookings, setBookingStatus, approveSeries, moveBooki
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/* ---------------- Verschieben-Dialog ---------------- */
+function MoveDialog({ entry, onCancel, onSave }) {
+  const [date, setDate] = useState(entry.date);
+  const [field, setField] = useState(entry.field);
+  const [zone, setZone] = useState(entry.zone);
+  const [start, setStart] = useState(entry.start);
+  const [end, setEnd] = useState(entry.end);
+  const zones = fieldById(field).zones;
+  const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
+  const timeInvalid = !(start < end);
+
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, marginBottom: 14, background: "#f7fbff" }}>
+      <div style={S.subHead}>{teamById(entry.team)?.name} verschieben</div>
+      <div style={S.formGrid}>
+        <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={S.select} /></Field>
+        <Field label="Platz">
+          <select value={field} onChange={(e) => { setField(e.target.value); setZone(fieldById(e.target.value).zones[0].id); }} style={S.select}>
+            {FIELDS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Einteilung / Zone">
+          <select value={safeZone} onChange={(e) => setZone(e.target.value)} style={S.select}>
+            {zones.map((z) => <option key={z.id} value={z.id}>{z.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Von"><input type="time" value={start} onChange={(e) => setStart(e.target.value)} style={S.select} /></Field>
+        <Field label="Bis"><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} style={S.select} /></Field>
+      </div>
+      {timeInvalid && <div style={S.warnBanner}>⚠️ Die Endzeit muss nach der Startzeit liegen.</div>}
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button style={{ ...S.primaryBtn, ...(timeInvalid ? S.btnDisabled : {}) }} disabled={timeInvalid}
+          onClick={() => onSave(entry, { date, field, zone: safeZone, start, end })}>
+          Verschieben & Trainer benachrichtigen
+        </button>
+        <button style={S.navBtn} onClick={onCancel}>Abbrechen</button>
+      </div>
     </div>
   );
 }

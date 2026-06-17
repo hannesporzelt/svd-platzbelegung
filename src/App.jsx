@@ -13,13 +13,22 @@ import Pitch from "./components/Pitch";
 const CONFLICT_HINT = "Dieser Platz ist zur gewählten Zeit bereits belegt.\n\nBitte eine andere Uhrzeit oder einen anderen Trainingstag wählen – oder den Platzwart kontaktieren.\n\nDu kannst den Wunsch trotzdem absenden; der Platzwart entscheidet darüber.";
 
 export default function App() {
-  const { user, isAdmin, loginAdmin, logoutAdmin } = useAuth();
+  const { user, authReady, isLoggedIn, role, isPlatzwart, isTrainer, myTeams, profile, loginEmail, resetPassword, logout, loginAdminPin, pinAdmin } = useAuth();
+  const isAdmin = isPlatzwart; // Kompatibilität: bestehender Code nutzt isAdmin = Platzwart-Rechte
+  const [showLogin, setShowLogin] = useState(false);
   const { bookings, bookingsReady, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries } = useBookings();
   const { locks, locksReady, addLock, removeLock } = useLocks();
   const { messages, messagesReady, addMessage, setMessageDone, removeMessage } = useMessages();
 
   const [view, setView] = useState("viewer"); // viewer | trainer | admin
   const [trainerTeam, setTrainerTeam] = useState("u15");
+
+  // Wenn ein Trainer eingeloggt ist: erstes zugeordnetes Team vorauswählen
+  React.useEffect(() => {
+    if (isTrainer && myTeams.length > 0 && !myTeams.includes(trainerTeam)) {
+      setTrainerTeam(myTeams[0]);
+    }
+  }, [isTrainer, myTeams]); // eslint-disable-line react-hooks/exhaustive-deps
   const [weekStart, setWeekStart] = useState(mondayOf(new Date()));
   const [activeField, setActiveField] = useState("p2");
   const [calMode, setCalMode] = useState("woche"); // woche | monat
@@ -76,15 +85,21 @@ export default function App() {
     return n;
   }, [days, entriesForDay]);
 
+  // Platzwart-Bereich öffnen: eingeloggter Platzwart kommt direkt rein,
+  // sonst Login-Maske anzeigen (echtes Konto oder Notfall-Passwort).
   const requestAdmin = () => {
-    if (isAdmin) { setView("admin"); return; }
-    const pw = window.prompt("Platzwart-Zugang – bitte Passwort eingeben:");
-    if (pw === null) return;
-    if (loginAdmin(pw)) setView("admin");
-    else window.alert("Falsches Passwort. Zugang verweigert.");
+    if (isPlatzwart) { setView("admin"); return; }
+    setShowLogin(true);
   };
 
-  const ready = bookingsReady && locksReady && messagesReady;
+  // Trainer-Bereich öffnen: eingeloggter Trainer/Platzwart direkt,
+  // sonst Login-Maske.
+  const requestTrainer = () => {
+    if (isTrainer || isPlatzwart) { setView("trainer"); return; }
+    setShowLogin(true);
+  };
+
+  const ready = bookingsReady && locksReady && messagesReady && authReady;
   if (!user || !ready)
     return (
       <div style={S.shell}>
@@ -97,11 +112,24 @@ export default function App() {
   return (
     <div style={S.shell}>
       {moveTarget && <MoveDialogOverlay entry={moveTarget} onCancel={() => setMoveTarget(null)} onSave={doMovePlan} />}
+      {showLogin && (
+        <LoginOverlay
+          onClose={() => setShowLogin(false)}
+          loginEmail={loginEmail}
+          resetPassword={resetPassword}
+          loginAdminPin={loginAdminPin}
+        />
+      )}
       <Header
         view={view}
-        setView={(v) => (v === "admin" ? requestAdmin() : setView(v))}
+        setView={(v) => (v === "admin" ? requestAdmin() : v === "trainer" ? requestTrainer() : setView(v))}
         isAdmin={isAdmin}
-        logoutAdmin={() => { logoutAdmin(); setView("viewer"); }}
+        isLoggedIn={isLoggedIn}
+        role={role}
+        myTeams={myTeams}
+        profile={profile}
+        onLoginClick={() => setShowLogin(true)}
+        logoutAdmin={async () => { await logout(); setView("viewer"); }}
         trainerTeam={trainerTeam}
         setTrainerTeam={setTrainerTeam}
         notices={pendingCount + weekConflictCount + openMsgCount}
@@ -223,7 +251,12 @@ export default function App() {
 }
 
 /* ---------------- Header ---------------- */
-function Header({ view, setView, isAdmin, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount }) {
+function Header({ view, setView, isAdmin, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount }) {
+  // Welche Teams darf der Trainer im Dropdown wählen?
+  // Eingeloggter Trainer: nur seine zugeordneten Teams. Platzwart/Notfall: alle.
+  const teamOptions = (role === "trainer" && myTeams.length > 0)
+    ? TEAMS.filter((t) => myTeams.includes(t.id))
+    : TEAMS;
   return (
     <header style={S.header}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -245,16 +278,86 @@ function Header({ view, setView, isAdmin, logoutAdmin, trainerTeam, setTrainerTe
         </div>
         {view === "trainer" && (
           <select value={trainerTeam} onChange={(e) => setTrainerTeam(e.target.value)} style={{ ...S.select, width: "auto" }}>
-            {TEAMS.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {teamOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         )}
-        {isAdmin && (
-          <button style={S.navBtn} onClick={logoutAdmin}>Platzwart abmelden</button>
+        {isLoggedIn ? (
+          <button style={S.navBtn} onClick={logoutAdmin} title={profile?.name || profile?.email || ""}>Abmelden</button>
+        ) : (
+          <button style={S.navBtn} onClick={onLoginClick}>Anmelden</button>
         )}
       </div>
     </header>
   );
 }
+
+/* ---------------- Login-Maske (E-Mail/Passwort) ---------------- */
+function LoginOverlay({ onClose, loginEmail, resetPassword, loginAdminPin }) {
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [info, setInfo] = useState("");
+
+  const doLogin = async () => {
+    setErr(""); setInfo(""); setBusy(true);
+    try {
+      await loginEmail(email, pw);
+      onClose();
+    } catch (e) {
+      // Notfall-Fallback: Wenn keine E-Mail angegeben wurde, Passwort als PIN prüfen
+      if (!email.trim() && loginAdminPin(pw)) { onClose(); return; }
+      setErr("Anmeldung fehlgeschlagen. Bitte E-Mail und Passwort prüfen.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doReset = async () => {
+    setErr(""); setInfo("");
+    if (!email.trim()) { setErr("Bitte zuerst die E-Mail-Adresse eintragen."); return; }
+    try {
+      await resetPassword(email);
+      setInfo("E-Mail zum Zurücksetzen des Passworts wurde versendet.");
+    } catch {
+      setErr("Konnte die E-Mail nicht versenden. Adresse korrekt?");
+    }
+  };
+
+  return (
+    <div style={ovl.backdrop} onClick={onClose}>
+      <div style={ovl.box} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ margin: "0 0 4px" }}>Anmelden</h3>
+        <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
+          Für Trainer und Platzwart. Betrachter brauchen keine Anmeldung.
+        </p>
+        <label style={ovl.label}>E-Mail</label>
+        <input style={S.select} type="email" autoComplete="username" value={email}
+          onChange={(e) => setEmail(e.target.value)} placeholder="name@example.de" />
+        <label style={ovl.label}>Passwort</label>
+        <input style={S.select} type="password" autoComplete="current-password" value={pw}
+          onChange={(e) => setPw(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") doLogin(); }} />
+        {err && <p style={{ color: "#b91c1c", fontSize: 13 }}>{err}</p>}
+        {info && <p style={{ color: "#15803d", fontSize: 13 }}>{info}</p>}
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button style={{ ...S.primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={doLogin}>
+            {busy ? "Anmelden…" : "Anmelden"}
+          </button>
+          <button style={S.navBtn} onClick={onClose}>Abbrechen</button>
+        </div>
+        <button style={ovl.linkBtn} onClick={doReset}>Passwort vergessen?</button>
+      </div>
+    </div>
+  );
+}
+
+const ovl = {
+  backdrop: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 },
+  box: { background: "#fff", borderRadius: 12, padding: 20, width: "100%", maxWidth: 360, boxShadow: "0 10px 40px rgba(0,0,0,0.25)" },
+  label: { display: "block", fontSize: 12, color: C.textSec, marginTop: 10, marginBottom: 4 },
+  linkBtn: { background: "none", border: "none", color: C.textSec, textDecoration: "underline", cursor: "pointer", fontSize: 13, marginTop: 12, padding: 0 },
+};
 
 /* ---------------- Wochennavigation ---------------- */
 function WeekNav({ weekStart, setWeekStart }) {

@@ -12,7 +12,12 @@ import { useEffect, useState } from "react";
 import {
   collection, doc, addDoc, deleteDoc, updateDoc, setDoc, onSnapshot, writeBatch,
 } from "firebase/firestore";
-import { db } from "./firebase";
+import { db, auth } from "./firebase";
+
+// Aktuelle Nutzer-UID (für ownerUid an Buchungen/Nachrichten).
+// Beim Verschieben/Bearbeiten bestehender Einträge wird die vorhandene
+// ownerUid beibehalten, damit der ursprüngliche Besitzer erhalten bleibt.
+const uid = () => auth.currentUser?.uid || null;
 
 function useCollection(name) {
   const [items, setItems] = useState([]);
@@ -43,11 +48,17 @@ export function useBookings() {
   return {
     bookings: items,
     bookingsReady: ready,
-    addBooking: (b) => setDoc(doc(db, "bookings", idFor(b)), b),
+    // ownerUid wird automatisch gesetzt (Ersteller). Ist am Eintrag schon eine
+    // ownerUid vorhanden (z. B. beim Verschieben), bleibt sie erhalten.
+    addBooking: (b) => {
+      const withOwner = { ...b, ownerUid: b.ownerUid || uid() };
+      return setDoc(doc(db, "bookings", idFor(withOwner)), withOwner);
+    },
     // Mehrere Belegungen einer Serie auf einmal schreiben (gemeinsame seriesId)
     addBookingSeries: async (entries) => {
       const batch = writeBatch(db);
-      entries.forEach((e) => batch.set(doc(db, "bookings", uniqueId()), e));
+      const owner = uid();
+      entries.forEach((e) => batch.set(doc(db, "bookings", uniqueId()), { ...e, ownerUid: e.ownerUid || owner }));
       await batch.commit();
     },
     // Status eines Antrags ändern (z. B. "frei" = freigegeben)
@@ -58,10 +69,11 @@ export function useBookings() {
       allBookings.filter((b) => b.seriesId === seriesId).forEach((b) => batch.update(doc(db, "bookings", b.id), { status: "frei" }));
       await batch.commit();
     },
-    // Einen Termin verschieben: neuen Datensatz mit eindeutiger ID anlegen, alten löschen
+    // Einen Termin verschieben: neuen Datensatz mit eindeutiger ID anlegen, alten löschen.
+    // Die ownerUid des Originals bleibt erhalten (sonst Fallback auf aktuellen Nutzer).
     moveBooking: async (oldId, newData) => {
       const { id, ...clean } = newData;
-      await setDoc(doc(db, "bookings", uniqueId()), clean);
+      await setDoc(doc(db, "bookings", uniqueId()), { ...clean, ownerUid: clean.ownerUid || uid() });
       await deleteDoc(doc(db, "bookings", oldId));
     },
     removeBooking: (id) => deleteDoc(doc(db, "bookings", id)),
@@ -134,7 +146,7 @@ export function useMessages() {
   return {
     messages: items,
     messagesReady: ready,
-    addMessage: (m) => addDoc(collection(db, "messages"), { ...m, done: false, ts: Date.now() }),
+    addMessage: (m) => addDoc(collection(db, "messages"), { ...m, senderUid: uid(), done: false, ts: Date.now() }),
     setMessageDone: (id, done) => updateDoc(doc(db, "messages", id), { done }),
     removeMessage: (id) => deleteDoc(doc(db, "messages", id)),
   };

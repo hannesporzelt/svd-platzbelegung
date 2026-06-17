@@ -664,7 +664,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDayApproval bookings={bookings} setBookingStatus={setBookingStatus} approveSeries={approveSeries} moveBooking={moveBooking} removeBooking={removeBooking} removeSeries={removeSeries} addMessage={addMessage} />}
       {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} users={users} />}
-      {tab === "nutzer" && <UserManager users={users} saveUser={saveUser} setUserTeams={setUserTeams} removeUser={removeUser} />}
+      {tab === "nutzer" && <UserManager users={users} saveUser={saveUser} setUserRole={setUserRole} setUserTeams={setUserTeams} removeUser={removeUser} />}
     </div>
   );
 }
@@ -781,9 +781,8 @@ function MessageInbox({ messages, setMessageDone, removeMessage, users }) {
 }
 
 /* ---------------- Nutzerverwaltung (Platzwart) ---------------- */
-function UserManager({ users, saveUser, setUserTeams, removeUser }) {
+function UserManager({ users, saveUser, setUserRole, setUserTeams, removeUser }) {
   const list = (users || []).slice().sort((a, b) => {
-    // Platzwarte zuerst, dann nach Name/Email
     if ((a.role === "platzwart") !== (b.role === "platzwart")) return a.role === "platzwart" ? -1 : 1;
     return (a.name || a.email || "").localeCompare(b.name || b.email || "");
   });
@@ -794,50 +793,70 @@ function UserManager({ users, saveUser, setUserTeams, removeUser }) {
   const toggleTeam = (tid) => setDraftTeams((d) => d.includes(tid) ? d.filter((x) => x !== tid) : [...d, tid]);
   const saveTeams = (u) => { setUserTeams(u.id, draftTeams); setEditId(null); };
 
+  const noRole = list.filter((u) => u.role !== "trainer" && u.role !== "platzwart");
+
   return (
     <div>
       <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
-        Übersicht aller angemeldeten Trainer und Platzwarte. Konten werden in der Firebase-Console angelegt; hier kannst du die zugeordneten Teams anpassen.
+        Übersicht aller angemeldeten Nutzer. Konten werden in der Firebase-Console angelegt; nach der ersten Anmeldung erscheinen sie hier automatisch (mit E-Mail). Rolle und Teams vergibst du hier.
       </p>
-      {list.length === 0 && <p style={{ color: C.textSec, fontSize: 14 }}>Noch keine Nutzerprofile vorhanden.</p>}
-      {list.map((u) => (
-        <div key={u.id} style={{ ...S.wishRow, flexDirection: "column", alignItems: "stretch", gap: 6 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-            <div>
-              <b>{u.name || "(ohne Name)"}</b>
-              <span style={{ marginLeft: 8, fontSize: 12, padding: "1px 8px", borderRadius: 10, background: u.role === "platzwart" ? "#fde68a" : "#dbeafe", color: "#334" }}>
-                {u.role === "platzwart" ? "Platzwart" : u.role === "trainer" ? "Trainer" : (u.role || "—")}
-              </span>
-            </div>
-            <span style={{ fontSize: 13, color: C.textSec }}>{u.email || "(keine E-Mail hinterlegt)"}</span>
-          </div>
-          {u.role !== "platzwart" && (
-            <div style={{ fontSize: 13 }}>
-              {editId === u.id ? (
-                <div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "6px 0" }}>
-                    {TEAMS.map((t) => (
-                      <button key={t.id} onClick={() => toggleTeam(t.id)}
-                        style={{ ...S.roleBtn, ...(draftTeams.includes(t.id) ? S.roleBtnActive : {}), fontSize: 12 }}>
-                        {t.name}
-                      </button>
-                    ))}
-                  </div>
-                  <button style={S.okBtn} onClick={() => saveTeams(u)}>Teams speichern</button>
-                  <button style={{ ...S.navBtn, marginLeft: 6 }} onClick={() => setEditId(null)}>Abbrechen</button>
-                </div>
-              ) : (
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                  <span style={{ color: C.textSec }}>
-                    Teams: {Array.isArray(u.teams) && u.teams.length ? u.teams.map((tid) => teamById(tid)?.name || tid).join(", ") : "—"}
-                  </span>
-                  <button style={S.navBtn} onClick={() => startEdit(u)}>Teams bearbeiten</button>
-                </div>
-              )}
-            </div>
-          )}
+
+      {noRole.length > 0 && (
+        <div style={{ ...S.warnBanner, background: "#fff7ed", color: "#7c2d12", border: "1px solid #fed7aa", display: "block", marginBottom: 12 }}>
+          {noRole.length} neue Anmeldung{noRole.length === 1 ? "" : "en"} ohne Rolle – bitte unten als Trainer freischalten.
         </div>
-      ))}
+      )}
+
+      {list.length === 0 && <p style={{ color: C.textSec, fontSize: 14 }}>Noch keine Nutzerprofile vorhanden.</p>}
+
+      {list.map((u) => {
+        const isNew = u.role !== "trainer" && u.role !== "platzwart";
+        return (
+          <div key={u.id} style={{ ...S.wishRow, flexDirection: "column", alignItems: "stretch", gap: 6, ...(isNew ? { background: "#fff7ed" } : {}) }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+              <div>
+                <b>{u.name || "(ohne Name)"}</b>
+                <span style={{ marginLeft: 8, fontSize: 12, padding: "1px 8px", borderRadius: 10, background: u.role === "platzwart" ? "#fde68a" : u.role === "trainer" ? "#dbeafe" : "#fed7aa", color: "#334" }}>
+                  {u.role === "platzwart" ? "Platzwart" : u.role === "trainer" ? "Trainer" : "neu – ohne Rolle"}
+                </span>
+              </div>
+              <span style={{ fontSize: 13, color: C.textSec }}>{u.email || "(keine E-Mail)"}</span>
+            </div>
+
+            {isNew && (
+              <div>
+                <button style={S.okBtn} onClick={() => setUserRole(u.id, "trainer")}>Als Trainer freischalten</button>
+              </div>
+            )}
+
+            {u.role === "trainer" && (
+              <div style={{ fontSize: 13 }}>
+                {editId === u.id ? (
+                  <div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "6px 0" }}>
+                      {TEAMS.map((t) => (
+                        <button key={t.id} onClick={() => toggleTeam(t.id)}
+                          style={{ ...S.roleBtn, ...(draftTeams.includes(t.id) ? S.roleBtnActive : {}), fontSize: 12 }}>
+                          {t.name}
+                        </button>
+                      ))}
+                    </div>
+                    <button style={S.okBtn} onClick={() => saveTeams(u)}>Teams speichern</button>
+                    <button style={{ ...S.navBtn, marginLeft: 6 }} onClick={() => setEditId(null)}>Abbrechen</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <span style={{ color: C.textSec }}>
+                      Teams: {Array.isArray(u.teams) && u.teams.length ? u.teams.map((tid) => teamById(tid)?.name || tid).join(", ") : "—"}
+                    </span>
+                    <button style={S.navBtn} onClick={() => startEdit(u)}>Teams bearbeiten</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

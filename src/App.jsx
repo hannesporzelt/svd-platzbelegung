@@ -223,7 +223,7 @@ export default function App() {
         />
       )}
 
-      {view === "trainer" && (
+      {view === "trainer" && (isTrainer || isPlatzwart) && (
         <TrainerPanel
           trainerTeam={trainerTeam}
           bookings={bookings}
@@ -236,9 +236,15 @@ export default function App() {
         />
       )}
 
+      {view === "trainer" && !isTrainer && !isPlatzwart && (
+        <div style={{ ...S.card, marginTop: "1rem", color: C.textSec, fontSize: 14 }}>
+          Zum Eintragen von Trainingszeiten bitte oben rechts <b>anmelden</b>. Den Zugang bekommst du vom Platzwart.
+        </div>
+      )}
+
       {view === "viewer" && (
         <div style={{ ...S.card, marginTop: "1rem", color: C.textSec, fontSize: 14 }}>
-          Lesemodus. Trainer können ohne Anmeldung Trainingstage beantragen (einzeln oder wiederkehrend). Die Anträge erscheinen im Kalender, sobald der Platzwart sie freigibt. Der Platzwart pflegt Belegungen, Heimspiele und Sperren.
+          Lesemodus. Angemeldete Trainer können Trainingstage beantragen (einzeln oder wiederkehrend); die Anträge erscheinen im Kalender, sobald der Platzwart sie freigibt. Der Platzwart pflegt Belegungen, Heimspiele und Sperren.
         </div>
       )}
 

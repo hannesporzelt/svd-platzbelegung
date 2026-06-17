@@ -110,6 +110,23 @@ export function useLocks() {
   };
 }
 
+// Nutzerprofile (Rolle + zugeordnete Teams).
+//   users   docId = uid; { role: "trainer"|"platzwart", teams: [teamId,...], name, email }
+// Wird vom Platzwart in der Nutzerverwaltung gepflegt. Der Login liest das
+// eigene Profil separat (siehe lib/auth.js).
+export function useUsers() {
+  const { items, ready } = useCollection("users");
+  return {
+    users: items,
+    usersReady: ready,
+    // Profil anlegen/überschreiben (docId = uid des Kontos aus der Firebase-Console)
+    saveUser: (uid, data) => setDoc(doc(db, "users", uid), data, { merge: true }),
+    setUserRole: (uid, role) => updateDoc(doc(db, "users", uid), { role }),
+    setUserTeams: (uid, teams) => updateDoc(doc(db, "users", uid), { teams }),
+    removeUser: (uid) => deleteDoc(doc(db, "users", uid)),
+  };
+}
+
 // Nachrichten von Trainern an den Admin
 //   messages   { team, text, ts, done }
 export function useMessages() {

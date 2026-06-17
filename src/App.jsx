@@ -5,7 +5,7 @@ import {
   autoTrainingForDay, findConflicts, conflictIdsForEntries,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
-import { useBookings, useLocks, useMessages } from "./lib/data";
+import { useBookings, useLocks, useMessages, useUsers } from "./lib/data";
 import { C, S } from "./lib/styles";
 import Pitch from "./components/Pitch";
 
@@ -19,6 +19,7 @@ export default function App() {
   const { bookings, bookingsReady, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries } = useBookings();
   const { locks, locksReady, addLock, removeLock } = useLocks();
   const { messages, messagesReady, addMessage, setMessageDone, removeMessage } = useMessages();
+  const { users, saveUser, setUserRole, setUserTeams, removeUser } = useUsers(isPlatzwart);
 
   const [view, setView] = useState("viewer"); // viewer | trainer | admin
   const [trainerTeam, setTrainerTeam] = useState("u15");
@@ -220,6 +221,11 @@ export default function App() {
           setMessageDone={setMessageDone}
           removeMessage={removeMessage}
           onMove={setMoveTarget}
+          users={users}
+          saveUser={saveUser}
+          setUserRole={setUserRole}
+          setUserTeams={setUserTeams}
+          removeUser={removeUser}
         />
       )}
 
@@ -233,6 +239,8 @@ export default function App() {
           entriesForDay={entriesForDay}
           addMessage={addMessage}
           messages={messages}
+          myUid={user?.uid}
+          myTeams={myTeams}
         />
       )}
 
@@ -629,7 +637,7 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
 }
 
 /* ---------------- Admin ---------------- */
-function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove }) {
+function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, removeUser }) {
   const [tab, setTab] = useState("belegung");
   const pending = bookings.filter((b) => b.status === "beantragt" && b.date >= dayKey(new Date())).length;
   const openMsg = messages.filter((m) => !m.done && m.dir !== "out").length;
@@ -644,6 +652,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
           ["sperre", "Platzsperre"],
           ["trainingstage", `Trainingstage${pending ? ` (${pending})` : ""}`],
           ["nachrichten", `Nachrichten${openMsg ? ` (${openMsg})` : ""}`],
+          ["nutzer", "Nutzer"],
         ].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...S.tab, ...(tab === k ? S.tabActive : {}) }}>{l}</button>
         ))}
@@ -654,7 +663,8 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       {tab === "verwalten" && <BookingManager bookings={bookings} removeBooking={removeBooking} removeSeries={removeSeries} onMove={onMove} />}
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDayApproval bookings={bookings} setBookingStatus={setBookingStatus} approveSeries={approveSeries} moveBooking={moveBooking} removeBooking={removeBooking} removeSeries={removeSeries} addMessage={addMessage} />}
-      {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} />}
+      {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} users={users} />}
+      {tab === "nutzer" && <UserManager users={users} saveUser={saveUser} setUserTeams={setUserTeams} removeUser={removeUser} />}
     </div>
   );
 }
@@ -722,8 +732,18 @@ function BookingManager({ bookings, removeBooking, removeSeries, onMove }) {
 }
 
 // Platzwart: Nachrichten von Trainern
-function MessageInbox({ messages, setMessageDone, removeMessage }) {
-  const sorted = messages.slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));
+function MessageInbox({ messages, setMessageDone, removeMessage, users }) {
+  // Inbox zeigt nur eingehende Nachrichten (Trainer -> Platzwart)
+  const userById = {};
+  (users || []).forEach((u) => { userById[u.id] = u; });
+  const senderLabel = (m) => {
+    const u = m.senderUid ? userById[m.senderUid] : null;
+    const who = u ? (u.name || u.email) : null;
+    const team = teamById(m.team)?.name || m.team;
+    return who ? `${team} · ${who}` : team;
+  };
+  const all = messages.filter((m) => m.dir !== "out");
+  const sorted = all.slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));
   const open = sorted.filter((m) => !m.done);
   const done = sorted.filter((m) => m.done);
   const fmtTs = (ts) => ts ? new Date(ts).toLocaleString("de-DE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
@@ -733,7 +753,7 @@ function MessageInbox({ messages, setMessageDone, removeMessage }) {
       {open.map((m) => (
         <div key={m.id} style={S.wishRow}>
           <div style={{ flex: 1 }}>
-            <b>{teamById(m.team)?.name || m.team}</b> <span style={{ fontSize: 12, color: C.textSec }}>· {fmtTs(m.ts)}</span>
+            <b>{senderLabel(m)}</b> <span style={{ fontSize: 12, color: C.textSec }}>· {fmtTs(m.ts)}</span>
             <div style={{ fontSize: 14, marginTop: 2 }}>{m.text}</div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
@@ -747,7 +767,7 @@ function MessageInbox({ messages, setMessageDone, removeMessage }) {
           <div style={S.subHead}>Erledigt</div>
           {done.slice(0, 10).map((m) => (
             <div key={m.id} style={{ ...S.listRow, opacity: 0.7 }}>
-              <span>{teamById(m.team)?.name} · {fmtTs(m.ts)} · {m.text}</span>
+              <span>{senderLabel(m)} · {fmtTs(m.ts)} · {m.text}</span>
               <span style={{ display: "flex", gap: 6 }}>
                 <button style={S.navBtn} onClick={() => setMessageDone(m.id, false)}>Zurück</button>
                 <button style={S.delBtn} onClick={() => removeMessage(m.id)}>Löschen</button>
@@ -759,6 +779,70 @@ function MessageInbox({ messages, setMessageDone, removeMessage }) {
     </div>
   );
 }
+
+/* ---------------- Nutzerverwaltung (Platzwart) ---------------- */
+function UserManager({ users, saveUser, setUserTeams, removeUser }) {
+  const list = (users || []).slice().sort((a, b) => {
+    // Platzwarte zuerst, dann nach Name/Email
+    if ((a.role === "platzwart") !== (b.role === "platzwart")) return a.role === "platzwart" ? -1 : 1;
+    return (a.name || a.email || "").localeCompare(b.name || b.email || "");
+  });
+  const [editId, setEditId] = useState(null);
+  const [draftTeams, setDraftTeams] = useState([]);
+
+  const startEdit = (u) => { setEditId(u.id); setDraftTeams(Array.isArray(u.teams) ? u.teams : []); };
+  const toggleTeam = (tid) => setDraftTeams((d) => d.includes(tid) ? d.filter((x) => x !== tid) : [...d, tid]);
+  const saveTeams = (u) => { setUserTeams(u.id, draftTeams); setEditId(null); };
+
+  return (
+    <div>
+      <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
+        Übersicht aller angemeldeten Trainer und Platzwarte. Konten werden in der Firebase-Console angelegt; hier kannst du die zugeordneten Teams anpassen.
+      </p>
+      {list.length === 0 && <p style={{ color: C.textSec, fontSize: 14 }}>Noch keine Nutzerprofile vorhanden.</p>}
+      {list.map((u) => (
+        <div key={u.id} style={{ ...S.wishRow, flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <div>
+              <b>{u.name || "(ohne Name)"}</b>
+              <span style={{ marginLeft: 8, fontSize: 12, padding: "1px 8px", borderRadius: 10, background: u.role === "platzwart" ? "#fde68a" : "#dbeafe", color: "#334" }}>
+                {u.role === "platzwart" ? "Platzwart" : u.role === "trainer" ? "Trainer" : (u.role || "—")}
+              </span>
+            </div>
+            <span style={{ fontSize: 13, color: C.textSec }}>{u.email || "(keine E-Mail hinterlegt)"}</span>
+          </div>
+          {u.role !== "platzwart" && (
+            <div style={{ fontSize: 13 }}>
+              {editId === u.id ? (
+                <div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "6px 0" }}>
+                    {TEAMS.map((t) => (
+                      <button key={t.id} onClick={() => toggleTeam(t.id)}
+                        style={{ ...S.roleBtn, ...(draftTeams.includes(t.id) ? S.roleBtnActive : {}), fontSize: 12 }}>
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
+                  <button style={S.okBtn} onClick={() => saveTeams(u)}>Teams speichern</button>
+                  <button style={{ ...S.navBtn, marginLeft: 6 }} onClick={() => setEditId(null)}>Abbrechen</button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span style={{ color: C.textSec }}>
+                    Teams: {Array.isArray(u.teams) && u.teams.length ? u.teams.map((tid) => teamById(tid)?.name || tid).join(", ") : "—"}
+                  </span>
+                  <button style={S.navBtn} onClick={() => startEdit(u)}>Teams bearbeiten</button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 
 function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeries, removeBooking, removeSeries, kind }) {
   const [mode, setMode] = useState("single"); // single | series
@@ -973,7 +1057,7 @@ function TrainDayApproval({ bookings, setBookingStatus, approveSeries, moveBooki
   const reject = (b, label) => {
     const reason = window.prompt(`Antrag ablehnen – kurze Nachricht an ${teamById(b.team)?.name} (optional):`, "");
     if (reason === null) return;
-    addMessage({ team: b.team, dir: "out", text: `Trainingstag ${label} wurde abgelehnt.${reason ? " " + reason : ""}` });
+    addMessage({ team: b.team, recipientUid: b.ownerUid || null, dir: "out", text: `Trainingstag ${label} wurde abgelehnt.${reason ? " " + reason : ""}` });
     removeBooking(b.id);
   };
 
@@ -981,7 +1065,7 @@ function TrainDayApproval({ bookings, setBookingStatus, approveSeries, moveBooki
     const b = list[0];
     const reason = window.prompt(`Ganze Serie ablehnen – kurze Nachricht an ${teamById(b.team)?.name} (optional):`, "");
     if (reason === null) return;
-    addMessage({ team: b.team, dir: "out", text: `Die beantragte Trainings-Serie (${WEEKDAYS[(new Date(b.date+"T12:00").getDay()+6)%7]} ${b.start}–${b.end}) wurde abgelehnt.${reason ? " " + reason : ""}` });
+    addMessage({ team: b.team, recipientUid: b.ownerUid || null, dir: "out", text: `Die beantragte Trainings-Serie (${WEEKDAYS[(new Date(b.date+"T12:00").getDay()+6)%7]} ${b.start}–${b.end}) wurde abgelehnt.${reason ? " " + reason : ""}` });
     removeSeries(sid, bookings);
   };
 
@@ -989,7 +1073,7 @@ function TrainDayApproval({ bookings, setBookingStatus, approveSeries, moveBooki
 
   const doMove = (b, neu) => {
     moveBooking(b.id, { ...neu, team: b.team, kind: "training", status: "frei" });
-    addMessage({ team: b.team, dir: "out", text: `${teamById(b.team)?.name} wurde verschoben auf ${fmtDate(neu.date)} ${neu.start}–${neu.end} (${fieldById(neu.field)?.name}, ${zoneText(neu.field, neu.zone)}), bitte prüfen.` });
+    addMessage({ team: b.team, recipientUid: b.ownerUid || null, dir: "out", text: `${teamById(b.team)?.name} wurde verschoben auf ${fmtDate(neu.date)} ${neu.start}–${neu.end} (${fieldById(neu.field)?.name}, ${zoneText(neu.field, neu.zone)}), bitte prüfen.` });
     setMoveTarget(null);
   };
 
@@ -1152,7 +1236,7 @@ function MoveDialogOverlay({ entry, onCancel, onSave }) {
 }
 
 /* ---------------- Trainer ---------------- */
-function TrainerPanel({ trainerTeam, bookings, bookingsByDay, addBooking, addBookingSeries, entriesForDay, addMessage, messages }) {
+function TrainerPanel({ trainerTeam, bookings, bookingsByDay, addBooking, addBookingSeries, entriesForDay, addMessage, messages, myUid, myTeams }) {
   const [tab, setTab] = useState("eintragen");
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
@@ -1162,7 +1246,7 @@ function TrainerPanel({ trainerTeam, bookings, bookingsByDay, addBooking, addBoo
         ))}
       </div>
       {tab === "eintragen" && <TrainerBookingForm trainerTeam={trainerTeam} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} entriesForDay={entriesForDay} />}
-      {tab === "nachricht" && <MessageForm trainerTeam={trainerTeam} addMessage={addMessage} messages={messages} />}
+      {tab === "nachricht" && <MessageForm trainerTeam={trainerTeam} addMessage={addMessage} messages={messages} myUid={myUid} myTeams={myTeams} />}
     </div>
   );
 }
@@ -1301,17 +1385,24 @@ function TrainerBookingForm({ trainerTeam, bookings, bookingsByDay, addBooking, 
   );
 }
 
-function MessageForm({ trainerTeam, addMessage, messages }) {
+function MessageForm({ trainerTeam, addMessage, messages, myUid, myTeams }) {
   const [text, setText] = useState("");
   const [sent, setSent] = useState(false);
+  const teams = Array.isArray(myTeams) && myTeams.length ? myTeams : [trainerTeam];
   const send = () => {
     const t = text.trim();
     if (!t) return;
     addMessage({ team: trainerTeam, text: t, dir: "in" });
     setText(""); setSent(true); setTimeout(() => setSent(false), 2000);
   };
-  const incoming = messages.filter((m) => m.team === trainerTeam && m.dir === "out").slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 8);
-  const mine = messages.filter((m) => m.team === trainerTeam && m.dir !== "out").slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 5);
+  // Eingehend (vom Platzwart): an mich persönlich ODER an eines meiner Teams
+  const incoming = messages
+    .filter((m) => m.dir === "out" && ((m.recipientUid && m.recipientUid === myUid) || (m.team && teams.includes(m.team))))
+    .slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 8);
+  // Meine gesendeten: was ich selbst geschickt habe
+  const mine = messages
+    .filter((m) => m.dir !== "out" && ((m.senderUid && m.senderUid === myUid) || (!m.senderUid && m.team === trainerTeam)))
+    .slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 5);
   const fmtTs = (ts) => ts ? new Date(ts).toLocaleString("de-DE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
   return (
     <div>

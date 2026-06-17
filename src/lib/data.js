@@ -19,16 +19,17 @@ import { db, auth } from "./firebase";
 // ownerUid beibehalten, damit der ursprüngliche Besitzer erhalten bleibt.
 const uid = () => auth.currentUser?.uid || null;
 
-function useCollection(name) {
+function useCollection(name, enabled = true) {
   const [items, setItems] = useState([]);
   const [ready, setReady] = useState(false);
   useEffect(() => {
+    if (!enabled) { setItems([]); setReady(true); return; }
     const unsub = onSnapshot(collection(db, name), (snap) => {
       setItems(snap.docs.map((d) => ({ ...d.data(), id: d.id })));
       setReady(true);
     });
     return unsub;
-  }, [name]);
+  }, [name, enabled]);
   return { items, ready };
 }
 
@@ -126,8 +127,8 @@ export function useLocks() {
 //   users   docId = uid; { role: "trainer"|"platzwart", teams: [teamId,...], name, email }
 // Wird vom Platzwart in der Nutzerverwaltung gepflegt. Der Login liest das
 // eigene Profil separat (siehe lib/auth.js).
-export function useUsers() {
-  const { items, ready } = useCollection("users");
+export function useUsers(enabled = true) {
+  const { items, ready } = useCollection("users", enabled);
   return {
     users: items,
     usersReady: ready,
@@ -139,8 +140,12 @@ export function useUsers() {
   };
 }
 
-// Nachrichten von Trainern an den Admin
-//   messages   { team, text, ts, done }
+// Nachrichten zwischen Trainern und Platzwart.
+//   messages   { team?, recipientUid?, senderUid, text, ts, done, dir }
+//     dir: "in"  = Trainer -> Platzwart (landet in der Platzwart-Inbox)
+//          "out" = Platzwart -> Trainer (an Team und/oder an eine Person)
+//     team:        Zielteam (alle Trainer des Teams sehen es) – optional
+//     recipientUid: gezielt an eine Person (z. B. Antragsteller) – optional
 export function useMessages() {
   const { items, ready } = useCollection("messages");
   return {

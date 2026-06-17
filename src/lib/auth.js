@@ -24,7 +24,7 @@ import {
   signOut,
   sendPasswordResetEmail,
 } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "1901";
@@ -68,10 +68,24 @@ export function useAuth() {
   // ----- Anmeldung mit E-Mail/Passwort -----
   const loginEmail = async (email, password) => {
     const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-    // Profil sofort nachladen, damit Rolle/Teams ohne Verzoegerung da sind
+    const ref = doc(db, "users", cred.user.uid);
     try {
-      const snap = await getDoc(doc(db, "users", cred.user.uid));
-      setProfile(snap.exists() ? snap.data() : null);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        // Erstanmeldung: Profil anlegen, OHNE Rolle (der Platzwart vergibt sie später).
+        // Die eigene E-Mail wird automatisch eingetragen.
+        const neu = { email: cred.user.email || email.trim(), teams: [] };
+        await setDoc(ref, neu, { merge: true });
+        setProfile(neu);
+      } else {
+        const data = snap.data();
+        // Falls die E-Mail im Profil noch fehlt: automatisch nachtragen.
+        if (!data.email && cred.user.email) {
+          await setDoc(ref, { email: cred.user.email }, { merge: true });
+          data.email = cred.user.email;
+        }
+        setProfile(data);
+      }
     } catch {
       setProfile(null);
     }

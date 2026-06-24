@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import {
   collection, doc, addDoc, deleteDoc, updateDoc, setDoc, onSnapshot, writeBatch,
+  query, where, getDocs,
 } from "firebase/firestore";
 import { db, auth } from "./firebase";
 
@@ -77,7 +78,28 @@ export function useBookings() {
       await setDoc(doc(db, "bookings", uniqueId()), { ...clean, ownerUid: clean.ownerUid || uid() });
       await deleteDoc(doc(db, "bookings", oldId));
     },
-    removeBooking: (id) => deleteDoc(doc(db, "bookings", id)),
+    removeBooking: async (id, allBookings) => {
+      // matchGroup ermitteln (aus übergebener Liste, sonst aus dem Dokument selbst)
+      let grp = null;
+      if (Array.isArray(allBookings)) {
+        grp = allBookings.find((b) => b.id === id)?.matchGroup || null;
+      }
+      // Wenn keine Liste übergeben wurde: matchGroup direkt aus dem Dokument lesen
+      if (!grp) {
+        try {
+          const cur = await getDocs(query(collection(db, "bookings"), where("__name__", "==", id)));
+          grp = cur.docs[0]?.data()?.matchGroup || null;
+        } catch { /* ignore */ }
+      }
+      await deleteDoc(doc(db, "bookings", id));
+      // Verknüpften Aufwärm-Block / Spiel mit gleicher matchGroup mitlöschen
+      if (grp) {
+        try {
+          const snap = await getDocs(query(collection(db, "bookings"), where("matchGroup", "==", grp)));
+          await Promise.all(snap.docs.map((d) => deleteDoc(doc(db, "bookings", d.id))));
+        } catch { /* ignore */ }
+      }
+    },
     // Ganze Serie anhand der seriesId entfernen
     removeSeries: async (seriesId, allBookings) => {
       const batch = writeBatch(db);

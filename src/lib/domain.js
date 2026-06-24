@@ -134,8 +134,33 @@ const toMin = (t) => {
   const [h, m] = (t || "0:0").split(":").map(Number);
   return h * 60 + m;
 };
-export const timeOverlap = (a, b) =>
-  toMin(a.start) < toMin(b.end) && toMin(b.start) < toMin(a.end);
+const minToTime = (mins) => {
+  const m = Math.max(0, Math.min(24 * 60, mins));
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+};
+
+// Vor-/Nachlauf bei Heimspielen: 60 Min Aufwärmen davor, 15 Min Abbau danach.
+// Die gespeicherte Anstoß-/Endzeit bleibt unverändert – diese Funktion liefert
+// nur die EFFEKTIV belegte Zeitspanne für Konfliktprüfung und Anzeige.
+// Ist das Aufwärmen auf einen ANDEREN Platz ausgelagert (warmupField gesetzt und
+// != Spielplatz), entfällt der 60-Min-Vorlauf auf dem Spielplatz – dort gilt dann
+// nur Anstoß bis Ende + 15 Min Abbau. Das Aufwärmen wird als eigener Block geführt.
+export const MATCH_PRE_MIN = 60;
+export const MATCH_POST_MIN = 15;
+export const effectiveSpan = (e) => {
+  if (e && e.kind === "match") {
+    const warmupElsewhere = e.warmupField && e.warmupField !== e.field;
+    const pre = warmupElsewhere ? 0 : MATCH_PRE_MIN;
+    return { start: minToTime(toMin(e.start) - pre), end: minToTime(toMin(e.end) + MATCH_POST_MIN) };
+  }
+  // Aufwärm-Block (eigener Eintrag): exakt die gespeicherte Zeit
+  return { start: e.start, end: e.end };
+};
+
+export const timeOverlap = (a, b) => {
+  const ea = effectiveSpan(a), eb = effectiveSpan(b);
+  return toMin(ea.start) < toMin(eb.end) && toMin(eb.start) < toMin(ea.end);
+};
 
 export const zonesOverlap = (a, b) => {
   if (a.field !== b.field) return false;
@@ -150,6 +175,28 @@ export const findConflicts = (candidate, existing) =>
   existing.filter(
     (e) => e.id !== candidate.id && zonesOverlap(candidate, e) && timeOverlap(candidate, e)
   );
+
+// Aufwärm-Block für ein Heimspiel mit ausgelagertem Aufwärmen.
+// Liefert null, wenn kein separater Block nötig ist (Aufwärmen auf dem Spielplatz).
+// Der Block belegt den ganzen Aufwärmplatz von Anstoß-60 bis Anstoß.
+const fullZoneOf = (fieldId) => {
+  const f = fieldById(fieldId);
+  return f ? f.zones[0].id : null;
+};
+export const warmupBlockFor = (match) => {
+  if (!match || match.kind !== "match") return null;
+  if (!match.warmupField || match.warmupField === match.field) return null;
+  return {
+    date: match.date,
+    field: match.warmupField,
+    zone: fullZoneOf(match.warmupField),
+    team: match.team,
+    start: minToTime(toMin(match.start) - MATCH_PRE_MIN),
+    end: match.start,
+    kind: "warmup",          // eigener Typ: Aufwärmen
+    status: match.status || "frei",
+  };
+};
 
 // Konflikte über einen ganzen Tag (für Admin-Hinweise): Paare finden
 export const conflictIdsForEntries = (entries) => {

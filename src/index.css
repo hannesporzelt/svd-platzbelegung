@@ -9,9 +9,31 @@ body {
 button { font-family: inherit; }
 input, select { font-family: inherit; }
 
-/* Druck: nur die Monatsübersicht zeigen, Rest ausblenden */
+/* ---------- Druck: nur der Kalender + Legende, DIN A4 quer ---------- */
 @media print {
-  .no-print { display: none !important; }
+  @page { size: A4 landscape; margin: 8mm; }
+
   body { background: #fff; }
-  @page { size: landscape; margin: 10mm; }
+
+  /* Alles ausblenden ... */
+  body * { visibility: hidden !important; }
+
+  /* ... außer der Kalenderkarte und allem darin */
+  .print-area, .print-area * { visibility: visible !important; }
+
+  /* Kalender an den Seitenanfang und über die volle Breite */
+  .print-area {
+    position: absolute !important;
+    left: 0; top: 0;
+    width: 100% !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  /* Bedienelemente im Kalender nicht mitdrucken */
+  .no-print { display: none !important; }
+
+  /* Umbrüche in Kalenderzellen vermeiden */
+  .print-area * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

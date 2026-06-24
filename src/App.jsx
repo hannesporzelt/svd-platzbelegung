@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useRef } from "react";
 import {
   TEAMS, FIELDS, teamById, fieldById, WEEKDAYS, WEEKDAYS_LONG,
   dayKey, mondayOf, addDays, isoWeek, fmtRange, expandRecurrence, zoneCovers,
-  autoTrainingForDay, findConflicts, conflictIdsForEntries,
+  autoTrainingForDay, findConflicts, conflictIdsForEntries, effectiveSpan, warmupBlockFor,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
 import { useBookings, useLocks, useMessages, useUsers } from "./lib/data";
@@ -393,10 +393,10 @@ function WeekNav({ weekStart, setWeekStart }) {
 /* ---------------- Wochenraster ---------------- */
 function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove }) {
   return (
-    <div style={S.card}>
+    <div style={S.card} className="print-area">
       <div style={S.gridHead}>
         <span>Wochenübersicht</span>
-        <div style={S.fieldTabs}>
+        <div style={S.fieldTabs} className="no-print">
           {FIELDS.map((f) => (
             <button key={f.id} onClick={() => setActiveField(f.id)} style={{ ...S.tab, ...(activeField === f.id ? S.tabActive : {}) }}>
               {f.name}
@@ -457,7 +457,16 @@ function Chip({ entry, conflict, isAdmin, removeBooking, onMove }) {
         {zoneLabel && <span style={S.zoneBadge}>{zoneLabel}</span>}
       </div>
       <div style={{ fontSize: 11, color: C.textSec }}>
-        {entry.start}–{entry.end}{entry.kind === "match" && " · Heimspiel"}{entry.kind === "turnier" && " · Turnier"}{entry.auto && " · fix"}
+        {entry.kind === "warmup"
+          ? <>Aufwärmen {entry.start}–{entry.end}</>
+          : entry.kind === "match"
+          ? <>Anstoß {entry.start}{entry.opponent ? ` · vs. ${entry.opponent}` : ""}<br />
+              <span style={{ fontSize: 10 }}>
+                {entry.warmupField && entry.warmupField !== entry.field
+                  ? <>Aufwärmen auf {fieldById(entry.warmupField)?.name} · Platz belegt {entry.start}–{effectiveSpan(entry).end}</>
+                  : <>Platz belegt {effectiveSpan(entry).start}–{effectiveSpan(entry).end} (inkl. Auf-/Abwärmen)</>}
+              </span></>
+          : <>{entry.start}–{entry.end}{entry.kind === "turnier" && " · Turnier"}{entry.auto && " · fix"}</>}
       </div>
       {canEdit && (
         <div style={{ display: "flex", gap: 4, marginTop: 5 }}>
@@ -718,7 +727,7 @@ function BookingManager({ bookings, removeBooking, removeSeries, onMove }) {
         <div key={b.id} style={{ ...S.listRow, flexWrap: "wrap" }}>
           <span style={{ flex: "1 1 260px", borderLeft: `3px solid ${teamById(b.team)?.color || C.textSec}`, paddingLeft: 8 }}>
             <b>{teamById(b.team)?.name || b.team}</b> · {fmtDate(b.date)} · {b.start}–{b.end}
-            <div style={{ fontSize: 12, color: C.textSec }}>{fieldById(b.field)?.name} · {zoneText(b.field, b.zone)}{b.kind === "match" ? " · Heimspiel" : ""}{b.kind === "turnier" ? " · Turnier" : ""}{b.seriesId ? " · Teil einer Serie" : ""}</div>
+            <div style={{ fontSize: 12, color: C.textSec }}>{fieldById(b.field)?.name} · {zoneText(b.field, b.zone)}{b.kind === "match" ? (b.opponent ? ` · vs. ${b.opponent}` : " · Heimspiel") : ""}{b.kind === "match" ? ` · belegt ${effectiveSpan(b).start}–${effectiveSpan(b).end}` : ""}{b.kind === "turnier" ? " · Turnier" : ""}{b.seriesId ? " · Teil einer Serie" : ""}</div>
           </span>
           <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {onMove && <button style={S.navBtn} onClick={() => onMove(b)}>Verschieben</button>}
@@ -875,6 +884,8 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
   const [zone, setZone] = useState("v1");
   const [start, setStart] = useState(matchLike ? "15:00" : "17:00");
   const [end, setEnd] = useState(matchLike ? "17:00" : "18:30");
+  const [opponent, setOpponent] = useState(""); // Gegner bei Heimspielen
+  const [warmupField, setWarmupField] = useState(""); // "" = auf dem Spielplatz
 
   const zones = fieldById(field).zones;
   const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
@@ -893,14 +904,36 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
 
   const addSingle = () => {
     const entry = { date, field, zone: safeZone, team, start, end, kind };
+    if (kind === "match" && opponent.trim()) entry.opponent = opponent.trim();
+    if (kind === "match" && warmupField && warmupField !== field) entry.warmupField = warmupField;
+    // Gemeinsame Gruppe für Spiel + ausgelagerten Aufwärm-Block (zum gemeinsamen Löschen)
+    const grp = (kind === "match" && warmupField && warmupField !== field)
+      ? `mg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` : null;
+    if (grp) entry.matchGroup = grp;
+
+    // Aufwärm-Block (nur wenn auf anderen Platz ausgelagert)
+    const warmup = warmupBlockFor({ ...entry, id: "__neu__" });
+    if (warmup && grp) warmup.matchGroup = grp;
+
+    // Konflikte für Spiel UND Aufwärm-Block prüfen
     const conflicts = findConflicts({ ...entry, id: "__neu__" }, allDayEntries);
-    if (conflicts.length > 0) {
-      const list = conflicts.map((c) =>
-        `• ${teamById(c.team)?.name || c.team} (${fieldById(c.field)?.zones.find((z) => z.id === c.zone)?.label}, ${c.start}–${c.end})${c.auto ? " – fixes Training" : ""}`
+    let warmupConflicts = [];
+    if (warmup) {
+      const warmupDayEntries = [
+        ...autoTrainingForDay(new Date(date + "T12:00")),
+        ...((bookingsByDay[date] || []).filter((b) => b.status !== "beantragt")),
+      ];
+      warmupConflicts = findConflicts({ ...warmup, id: "__warmup__" }, warmupDayEntries);
+    }
+    const allConf = [...conflicts, ...warmupConflicts];
+    if (allConf.length > 0) {
+      const list = allConf.map((c) =>
+        `• ${teamById(c.team)?.name || c.team} (${fieldById(c.field)?.name}, ${fieldById(c.field)?.zones.find((z) => z.id === c.zone)?.label}, ${c.start}–${c.end})${c.auto ? " – fixes Training" : ""}`
       ).join("\n");
-      if (!window.confirm(`Achtung – Doppelbelegung!\n\n${fieldById(field)?.name} ist zu dieser Zeit bereits belegt durch:\n${list}\n\nTrotzdem eintragen?`)) return;
+      if (!window.confirm(`Achtung – Doppelbelegung!\n\nFolgende Belegung(en) kollidieren${warmup ? " (Spiel und/oder Aufwärmplatz)" : ""}:\n${list}\n\nTrotzdem eintragen?`)) return;
     }
     addBooking(entry);
+    if (warmup) addBooking(warmup);
   };
 
   const addSeries = () => {
@@ -981,7 +1014,62 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
         </Field>
         <Field label="Von"><input type="time" value={start} onChange={(e) => setStart(e.target.value)} style={S.select} /></Field>
         <Field label="Bis"><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} style={S.select} /></Field>
+        {kind === "match" && (
+          <Field label="Gegner">
+            <input type="text" placeholder="z. B. TSV Musterdorf" value={opponent} onChange={(e) => setOpponent(e.target.value)} style={S.select} />
+          </Field>
+        )}
+        {kind === "match" && (
+          <Field label="Aufwärmen auf">
+            <select value={warmupField} onChange={(e) => setWarmupField(e.target.value)} style={S.select}>
+              <option value="">Spielplatz ({fieldById(field)?.name})</option>
+              {FIELDS.filter((f) => f.id !== field).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </Field>
+        )}
       </div>
+
+      {kind === "match" && !timeInvalid && (() => {
+        const wf = warmupField && warmupField !== field ? warmupField : null;
+        const wb = wf ? warmupBlockFor({ kind, date, field, start, end, team, warmupField: wf }) : null;
+        const spielEnd = effectiveSpan({ kind, start, end, warmupField: wf, field }).end;
+        // Prüfen, ob der Aufwärm-Block (oder das Aufwärmen auf dem Spielplatz) kollidiert
+        const dayEntriesAll = [
+          ...autoTrainingForDay(new Date(date + "T12:00")),
+          ...((bookingsByDay[date] || []).filter((b) => b.status !== "beantragt")),
+        ];
+        let warmupClash = [];
+        if (wb) {
+          warmupClash = findConflicts({ ...wb, id: "__wmcheck__" }, dayEntriesAll);
+        }
+        // Falls Aufwärmplatz belegt: freien Platz vorschlagen
+        let suggestion = null;
+        if (warmupClash.length > 0) {
+          for (const f of FIELDS) {
+            if (f.id === field) continue; // nicht der Spielplatz
+            const probe = warmupBlockFor({ kind, date, field, start, end, team, warmupField: f.id });
+            if (probe && findConflicts({ ...probe, id: "__probe__" }, dayEntriesAll).length === 0) {
+              suggestion = f; break;
+            }
+          }
+        }
+        return (
+          <>
+            <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>
+              Anstoß <b>{start}</b>, Ende {end}.{" "}
+              {wb
+                ? <>Aufwärmen auf <b>{fieldById(wf)?.name}</b> ({wb.start}–{wb.end}). Spielplatz {fieldById(field)?.name} belegt {start}–{spielEnd}.</>
+                : <>Spielplatz wird inkl. Aufwärmen (1 Std. vorher) und Abbau (15 Min. danach) von <b>{effectiveSpan({ kind, start, end }).start}</b> bis <b>{spielEnd}</b> geblockt.</>}
+            </div>
+            {warmupClash.length > 0 && (
+              <div style={S.warnBanner}>
+                ⚠️ Der Aufwärmplatz {fieldById(wf)?.name} ist {wb.start}–{wb.end} bereits belegt.
+                {suggestion ? <> Vorschlag: Aufwärmen auf <b>{suggestion.name}</b> (dort frei).</> : <> Alle anderen Plätze sind zu dieser Zeit ebenfalls belegt.</>}
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {timeInvalid && <div style={S.warnBanner}>⚠️ Die Endzeit muss nach der Startzeit liegen.</div>}
       {mode === "single" && !timeInvalid && liveConflicts.length > 0 && (
@@ -1005,7 +1093,7 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
           <div style={S.subHead}>Einträge an diesem Tag ({fieldById(field).name})</div>
           {dayEntries.map((e) => (
             <div key={e.id} style={S.listRow}>
-              <span><b>{teamById(e.team)?.name || e.team}</b> · {fieldById(e.field).name} · {fieldById(e.field).zones.find((z) => z.id === e.zone)?.label} · {e.start}–{e.end}{e.kind === "match" && " · Heimspiel"}{e.kind === "turnier" && " · Turnier"}{e.seriesId && " · Serie"}</span>
+              <span><b>{teamById(e.team)?.name || e.team}</b> · {fieldById(e.field).name} · {fieldById(e.field).zones.find((z) => z.id === e.zone)?.label} · {e.start}–{e.end}{e.kind === "match" && (e.opponent ? ` · vs. ${e.opponent}` : " · Heimspiel")}{e.kind === "turnier" && " · Turnier"}{e.seriesId && " · Serie"}</span>
               <span style={{ display: "flex", gap: 6 }}>
                 {e.seriesId && <button style={S.delBtn} onClick={() => { if (window.confirm("Die ganze Serie löschen?")) removeSeries(e.seriesId, bookings); }}>Serie löschen</button>}
                 <button style={S.delBtn} onClick={() => removeBooking(e.id)}>Löschen</button>

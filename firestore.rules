@@ -1,58 +1,75 @@
 rules_version = '2';
 
-// Sicherheitsregeln für die Platzbelegung.
+// Sicherheitsregeln Etappe 2 (final, OHNE Migration noetig).
 //
-// Modell laut Absprache:
-//  - Jeder (anonym angemeldet) darf den Plan LESEN.
-//  - Trainer dürfen Wünsche und Trainingstage SCHREIBEN (ohne echtes Konto).
-//  - Belegungen und Sperren sind dem Admin vorbehalten.
-//
-// Da der Admin in dieser Variante nur per Frontend-Passwort erkannt wird
-// (kein serverseitiges Konto), kann Firestore den Admin nicht zuverlässig
-// von einem Trainer unterscheiden. Deshalb sind hier zwei Stufen vorgesehen:
-//
-//  Stufe A (Standard, einfach): bookings/locks dürfen von jedem angemeldeten
-//  Nutzer geschrieben werden. Das Frontend zeigt die Schreib-UI nur dem Admin.
-//  Praktikabel für einen Vereinsbetrieb, aber technisch umgehbar.
-//
-//  Stufe B (härter, empfohlen bei Bedarf): Admin bekommt ein echtes Konto mit
-//  Custom Claim `admin:true` (siehe README). Dann die mit /* B */ markierten
-//  Zeilen aktivieren und die Stufe-A-Zeilen entfernen.
+// Modell:
+//  - Alle (auch anonyme Betrachter) duerfen den Plan LESEN.
+//  - Buchungen anlegen: nur eingeloggt, mit eigener ownerUid.
+//  - Buchungen aendern/loeschen: eigener Eintrag ODER Platzwart.
+//  - Alt-Buchungen OHNE ownerUid: gelten als "gehoert dem Platzwart"
+//    -> nur der Platzwart darf sie aendern/loeschen. Kein Nachruesten noetig.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() { return request.auth != null; }
-    /* B */ // function isAdmin() { return signedIn() && request.auth.token.admin == true; }
+
+    function isPlatzwart() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "platzwart";
+    }
+
+    function ownsExisting() {
+      return signedIn()
+        && resource.data.ownerUid is string
+        && resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isPlatzwart());
+      // Eigenes Profil anlegen/ergänzen erlaubt – aber NICHT mit selbst gesetzter Rolle.
+      // (Erstanmeldung trägt nur email/teams/name. Rolle vergibt nur der Platzwart.)
+      allow create: if isPlatzwart()
+                    || (signedIn() && request.auth.uid == uid
+                        && !("role" in request.resource.data));
+      allow update: if isPlatzwart()
+                    || (signedIn() && request.auth.uid == uid
+                        && !("role" in request.resource.data.diff(resource.data).affectedKeys()));
+      allow delete: if isPlatzwart();
+    }
 
     match /bookings/{id} {
       allow read: if signedIn();
-      allow write: if signedIn();              // Stufe A
-      /* B */ // allow write: if isAdmin();    // Stufe B
+      allow create: if signedIn()
+                    && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if ownsExisting() || isPlatzwart();
     }
 
     match /locks/{id} {
       allow read: if signedIn();
-      allow write: if signedIn();              // Stufe A
-      /* B */ // allow write: if isAdmin();    // Stufe B
+      allow write: if isPlatzwart();
     }
 
     match /wishes/{id} {
       allow read: if signedIn();
-      allow create: if signedIn();             // Trainer dürfen Wünsche anlegen
-      allow update, delete: if signedIn();     // Status setzen (Admin im Frontend)
-      /* B */ // allow update, delete: if isAdmin();
+      allow create: if signedIn();
+      allow update, delete: if signedIn();
     }
 
     match /trainingDays/{teamId} {
       allow read: if signedIn();
-      allow write: if signedIn();              // Trainer melden Trainingstage
+      allow write: if signedIn();
     }
 
     match /messages/{id} {
       allow read: if signedIn();
-      allow create: if signedIn();             // Trainer schreiben Nachrichten
-      allow update, delete: if signedIn();     // Admin hakt ab / entfernt (im Frontend)
+      allow create: if signedIn()
+                    && (!("senderUid" in request.resource.data)
+                        || request.resource.data.senderUid == request.auth.uid
+                        || isPlatzwart());
+      allow update, delete: if isPlatzwart()
+                    || (signedIn() && resource.data.senderUid == request.auth.uid);
     }
   }
 }

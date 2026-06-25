@@ -109,7 +109,7 @@ function hexToRgb(hex) {
 }
 
 export default function App() {
-  const { user, authReady, isLoggedIn, role, isPlatzwart, isTrainer, myTeams, profile, loginEmail, resetPassword, logout, loginAdminPin, pinAdmin } = useAuth();
+  const { user, authReady, isLoggedIn, role, isPlatzwart, isTrainer, myTeams, profile, loginEmail, resetPassword, registerEmail, logout, loginAdminPin, pinAdmin } = useAuth();
   const isAdmin = isPlatzwart; // Kompatibilität: bestehender Code nutzt isAdmin = Platzwart-Rechte
   const [showLogin, setShowLogin] = useState(false);
   const { bookings, bookingsReady, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries } = useBookings();
@@ -119,6 +119,7 @@ export default function App() {
   const { users, saveUser, setUserRole, setUserTeams, removeUser } = useUsers(isPlatzwart);
 
   const [view, setView] = useState("viewer"); // viewer | trainer | admin
+  const [msgsSeen, setMsgsSeen] = useState(false); // Login-Hinweis nur bis zum Ansehen zeigen
   const [trainerTeam, setTrainerTeam] = useState("u15");
 
   // Wenn ein Trainer eingeloggt ist: erstes zugeordnetes Team vorauswählen
@@ -174,6 +175,13 @@ export default function App() {
   const todayKeyTop = dayKey(new Date());
   const pendingCount = bookings.filter((b) => b.status === "beantragt" && b.date >= todayKeyTop).length;
   const openMsgCount = messages.filter((m) => !m.done).length;
+  // Neue Nachrichten vom Platzwart an den eingeloggten Trainer (für Login-Hinweis)
+  const trainerInbox = (isTrainer && user?.uid)
+    ? messages.filter((m) =>
+        m.dir === "out" && !m.done &&
+        ((m.recipientUid && m.recipientUid === user.uid) || (m.team && myTeams.includes(m.team))))
+    : [];
+  const trainerUnread = trainerInbox.length;
   const weekConflictCount = useMemo(() => {
     let n = 0;
     days.forEach((d) => {
@@ -215,6 +223,7 @@ export default function App() {
           onClose={() => setShowLogin(false)}
           loginEmail={loginEmail}
           resetPassword={resetPassword}
+          registerEmail={registerEmail}
           loginAdminPin={loginAdminPin}
         />
       )}
@@ -237,6 +246,13 @@ export default function App() {
       {pendingCount > 0 && (
         <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>
           📬 {pendingCount} Trainingstag-Antrag{pendingCount === 1 ? "" : "-anträge"} zur Freigabe{isAdmin ? " – im Platzwart-Bereich unter „Trainingstage“ prüfen." : ". Der Platzwart gibt sie frei."}
+        </div>
+      )}
+
+      {trainerUnread > 0 && !msgsSeen && (
+        <div style={{ ...S.warnBanner, background: "#fff8e1", color: "#7a5d00", border: "1px solid #f0e0a8", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span>📬 Du hast {trainerUnread} neue Nachricht{trainerUnread === 1 ? "" : "en"} vom Platzwart.</span>
+          <button style={{ ...S.navBtn, whiteSpace: "nowrap" }} onClick={() => { setView("trainer"); setMsgsSeen(true); }}>Nachrichten ansehen</button>
         </div>
       )}
 
@@ -410,9 +426,12 @@ function Header({ view, setView, isAdmin, isLoggedIn, role, myTeams, profile, on
 }
 
 /* ---------------- Login-Maske (E-Mail/Passwort) ---------------- */
-function LoginOverlay({ onClose, loginEmail, resetPassword, loginAdminPin }) {
+function LoginOverlay({ onClose, loginEmail, resetPassword, registerEmail, loginAdminPin }) {
+  const [mode, setMode] = useState("login"); // login | register
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
@@ -423,9 +442,29 @@ function LoginOverlay({ onClose, loginEmail, resetPassword, loginAdminPin }) {
       await loginEmail(email, pw);
       onClose();
     } catch (e) {
-      // Notfall-Fallback: Wenn keine E-Mail angegeben wurde, Passwort als PIN prüfen
       if (!email.trim() && loginAdminPin(pw)) { onClose(); return; }
       setErr("Anmeldung fehlgeschlagen. Bitte E-Mail und Passwort prüfen.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doRegister = async () => {
+    setErr(""); setInfo("");
+    if (!email.trim()) { setErr("Bitte eine E-Mail-Adresse eintragen."); return; }
+    if (pw.length < 6) { setErr("Das Passwort muss mindestens 6 Zeichen haben."); return; }
+    if (pw !== pw2) { setErr("Die beiden Passwörter stimmen nicht überein."); return; }
+    setBusy(true);
+    try {
+      await registerEmail(email, pw, name);
+      setInfo("Konto erstellt! Der Platzwart schaltet dich in Kürze als Trainer frei und weist dir deine Mannschaft zu.");
+      setTimeout(onClose, 2500);
+    } catch (e) {
+      const code = e?.code || "";
+      if (code === "auth/email-already-in-use") setErr("Für diese E-Mail gibt es bereits ein Konto. Bitte anmelden.");
+      else if (code === "auth/invalid-email") setErr("Diese E-Mail-Adresse ist ungültig.");
+      else if (code === "auth/weak-password") setErr("Das Passwort ist zu schwach (mindestens 6 Zeichen).");
+      else setErr("Registrierung fehlgeschlagen. Bitte später erneut versuchen.");
     } finally {
       setBusy(false);
     }
@@ -442,29 +481,63 @@ function LoginOverlay({ onClose, loginEmail, resetPassword, loginAdminPin }) {
     }
   };
 
+  const isReg = mode === "register";
   return (
     <div style={ovl.backdrop} onClick={onClose}>
       <div style={ovl.box} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ margin: "0 0 4px" }}>Anmelden</h3>
+        <h3 style={{ margin: "0 0 4px" }}>{isReg ? "Neues Trainer-Konto" : "Anmelden"}</h3>
         <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
-          Für Trainer und Platzwart. Betrachter brauchen keine Anmeldung.
+          {isReg
+            ? "Lege dein Trainer-Konto an. Nach der Registrierung schaltet dich der Platzwart frei und weist dir deine Mannschaft zu."
+            : "Für Trainer und Platzwart. Betrachter brauchen keine Anmeldung."}
         </p>
+        {isReg && (
+          <>
+            <label style={ovl.label}>Name (optional)</label>
+            <input style={S.select} type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Vor- und Nachname" />
+          </>
+        )}
         <label style={ovl.label}>E-Mail</label>
         <input style={S.select} type="email" autoComplete="username" value={email}
           onChange={(e) => setEmail(e.target.value)} placeholder="name@example.de" />
         <label style={ovl.label}>Passwort</label>
-        <input style={S.select} type="password" autoComplete="current-password" value={pw}
+        <input style={S.select} type="password" autoComplete={isReg ? "new-password" : "current-password"} value={pw}
           onChange={(e) => setPw(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") doLogin(); }} />
+          onKeyDown={(e) => { if (e.key === "Enter" && !isReg) doLogin(); }} />
+        {isReg && (
+          <>
+            <label style={ovl.label}>Passwort wiederholen</label>
+            <input style={S.select} type="password" autoComplete="new-password" value={pw2}
+              onChange={(e) => setPw2(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") doRegister(); }} />
+          </>
+        )}
         {err && <p style={{ color: "#b91c1c", fontSize: 13 }}>{err}</p>}
         {info && <p style={{ color: "#15803d", fontSize: 13 }}>{info}</p>}
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <button style={{ ...S.primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={doLogin}>
-            {busy ? "Anmelden…" : "Anmelden"}
-          </button>
+          {isReg ? (
+            <button style={{ ...S.primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={doRegister}>
+              {busy ? "Konto wird erstellt…" : "Konto erstellen"}
+            </button>
+          ) : (
+            <button style={{ ...S.primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={doLogin}>
+              {busy ? "Anmelden…" : "Anmelden"}
+            </button>
+          )}
           <button style={S.navBtn} onClick={onClose}>Abbrechen</button>
         </div>
-        <button style={ovl.linkBtn} onClick={doReset}>Passwort vergessen?</button>
+        {!isReg && <button style={ovl.linkBtn} onClick={doReset}>Passwort vergessen?</button>}
+        <div style={{ marginTop: 10, fontSize: 13 }}>
+          {isReg ? (
+            <button style={ovl.linkBtn} onClick={() => { setMode("login"); setErr(""); setInfo(""); }}>
+              Schon ein Konto? Hier anmelden
+            </button>
+          ) : (
+            <button style={ovl.linkBtn} onClick={() => { setMode("register"); setErr(""); setInfo(""); }}>
+              Noch kein Konto? Als Trainer registrieren
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -532,15 +605,24 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
                 ))}
               </div>
               {isAdmin && setNote && (
-                <button
-                  className="no-print"
-                  onClick={() => {
-                    const eingabe = window.prompt(`Notiz für ${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}. (leer = löschen):`, note?.text || "");
-                    if (eingabe !== null) setNote(dk, eingabe);
-                  }}
-                  style={{ marginTop: 6, width: "100%", border: `1px dashed ${C.border}`, background: "transparent", color: C.textSec, cursor: "pointer", fontSize: 11, borderRadius: 6, padding: "3px 0" }}>
-                  {note?.text ? "✎ Notiz" : "+ Notiz"}
-                </button>
+                <div className="no-print" style={{ display: "flex", gap: 4, marginTop: 6 }}>
+                  <button
+                    onClick={() => {
+                      const eingabe = window.prompt(`Notiz für ${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}.:`, note?.text || "");
+                      if (eingabe !== null) setNote(dk, eingabe);
+                    }}
+                    style={{ flex: 1, border: `1px dashed ${C.border}`, background: "transparent", color: C.textSec, cursor: "pointer", fontSize: 11, borderRadius: 6, padding: "3px 0" }}>
+                    {note?.text ? "✎ Notiz" : "+ Notiz"}
+                  </button>
+                  {note?.text && (
+                    <button
+                      title="Notiz löschen"
+                      onClick={() => { if (window.confirm("Notiz wirklich löschen?")) setNote(dk, ""); }}
+                      style={{ border: `1px solid #e7a5a5`, background: "#fbeaea", color: C.danger, cursor: "pointer", fontSize: 11, borderRadius: 6, padding: "3px 8px" }}>
+                      ✕
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           );

@@ -861,11 +861,35 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
 }
 
 /* ---------------- Admin ---------------- */
+// Menügruppen für den Platzwart-Bereich. Jede Gruppe bündelt zusammengehörige Funktionen.
+const ADMIN_MENU = [
+  { group: "Eintragen", items: [
+    ["belegung", "Belegung eintragen"],
+    ["spiel", "Heimspiel"],
+    ["turnier", "Turnier"],
+    ["sperre", "Platzsperre"],
+  ] },
+  { group: "Verwalten", items: [
+    ["verwalten", "Belegungen verwalten"],
+    ["trainingstage", "Trainingstage freigeben"],
+    ["konflikte", "Konflikte"],
+    ["statistik", "Statistik"],
+  ] },
+  { group: "Kommunikation", items: [
+    ["nachrichten", "Nachrichten"],
+  ] },
+  { group: "Konten", items: [
+    ["nutzer", "Nutzer verwalten"],
+  ] },
+];
+const ADMIN_LABELS = ADMIN_MENU.reduce((acc, g) => { g.items.forEach(([k, l]) => { acc[k] = l; }); return acc; }, {});
+
 function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, removeUser }) {
   const [tab, setTab] = useState("belegung");
+  const [menuOpen, setMenuOpen] = useState(false);
   const pending = bookings.filter((b) => b.status === "beantragt" && b.date >= dayKey(new Date())).length;
   const openMsg = messages.filter((m) => !m.done && m.dir !== "out").length;
-  // Anzahl Tage mit Konflikten ab heute (für Badge am Reiter)
+  // Anzahl Tage mit Konflikten ab heute (für Badge im Menü)
   const conflictDayCount = (() => {
     const today = dayKey(new Date());
     const byDay = {};
@@ -874,24 +898,47 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
     Object.values(byDay).forEach((list) => { if (conflictIdsForEntries(list).size > 0) n++; });
     return n;
   })();
+  // Badge-Zahl je Menüpunkt
+  const badgeFor = (k) => k === "trainingstage" ? pending : k === "nachrichten" ? openMsg : k === "konflikte" ? conflictDayCount : 0;
+
+  const choose = (k) => { setTab(k); setMenuOpen(false); };
+
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
-      <div style={S.adminTabs}>
-        {[
-          ["belegung", "Belegung eintragen"],
-          ["spiel", "Heimspiel"],
-          ["turnier", "Turnier"],
-          ["verwalten", "Belegungen verwalten"],
-          ["konflikte", `Konflikte${conflictDayCount ? ` (${conflictDayCount})` : ""}`],
-          ["statistik", "Statistik"],
-          ["sperre", "Platzsperre"],
-          ["trainingstage", `Trainingstage${pending ? ` (${pending})` : ""}`],
-          ["nachrichten", `Nachrichten${openMsg ? ` (${openMsg})` : ""}`],
-          ["nutzer", "Nutzer"],
-        ].map(([k, l]) => (
-          <button key={k} onClick={() => setTab(k)} style={{ ...S.tab, ...(tab === k ? S.tabActive : {}) }}>{l}</button>
-        ))}
+      {/* Klappmenü-Kopf: zeigt aktuellen Bereich, öffnet die Gruppenliste */}
+      <div style={{ position: "relative", marginBottom: 14 }}>
+        <button
+          onClick={() => setMenuOpen((o) => !o)}
+          style={{ ...S.navBtn, display: "flex", alignItems: "center", gap: 8, fontWeight: 500, width: "100%", justifyContent: "space-between" }}>
+          <span>☰ {ADMIN_LABELS[tab] || "Menü"}</span>
+          <span style={{ color: C.textSec, fontSize: 12 }}>{menuOpen ? "▲" : "▼"}</span>
+        </button>
+        {menuOpen && (
+          <>
+            {/* Klick außerhalb schließt das Menü */}
+            <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+            <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 8px 28px rgba(0,0,0,0.16)", padding: 8, maxHeight: 380, overflowY: "auto" }}>
+              {ADMIN_MENU.map((grp) => (
+                <div key={grp.group} style={{ marginBottom: 6 }}>
+                  <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "6px 8px 2px" }}>{grp.group}</div>
+                  {grp.items.map(([k, l]) => {
+                    const b = badgeFor(k);
+                    const active = tab === k;
+                    return (
+                      <button key={k} onClick={() => choose(k)}
+                        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left", border: "none", background: active ? C.brand : "transparent", color: active ? "#fff" : C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>
+                        <span>{l}</span>
+                        {b > 0 && <span style={{ ...S.badge, ...(active ? { background: "#fff", color: C.brand } : {}) }}>{b}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
+
       {tab === "belegung" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="training" />}
       {tab === "spiel" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="match" />}
       {tab === "turnier" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="turnier" />}

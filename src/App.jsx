@@ -3,6 +3,7 @@ import {
   TEAMS, FIELDS, teamById, fieldById, WEEKDAYS, WEEKDAYS_LONG,
   dayKey, mondayOf, addDays, isoWeek, fmtRange, expandRecurrence, zoneCovers,
   autoTrainingForDay, findConflicts, conflictIdsForEntries, effectiveSpan, warmupBlockFor,
+  zonesOverlap, timeOverlap,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
 import { useBookings, useLocks, useMessages, useUsers } from "./lib/data";
@@ -11,6 +12,101 @@ import Pitch from "./components/Pitch";
 
 // Hinweistext für Trainer, wenn der gewünschte Slot belegt ist
 const CONFLICT_HINT = "Dieser Platz ist zur gewählten Zeit bereits belegt.\n\nBitte eine andere Uhrzeit oder einen anderen Trainingstag wählen – oder den Platzwart kontaktieren.\n\nDu kannst den Wunsch trotzdem absenden; der Platzwart entscheidet darüber.";
+
+const MONTHS_PDF = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+
+// jsPDF bei Bedarf vom CDN laden (kein Build-Paket nötig)
+function loadJsPDF() {
+  return new Promise((resolve, reject) => {
+    if (window.jspdf && window.jspdf.jsPDF) return resolve(window.jspdf.jsPDF);
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    s.onload = () => resolve(window.jspdf.jsPDF);
+    s.onerror = () => reject(new Error("PDF-Bibliothek konnte nicht geladen werden. Besteht eine Internetverbindung?"));
+    document.head.appendChild(s);
+  });
+}
+
+// Monatsplan als PDF erzeugen (DIN A4 quer), als Kalenderraster gezeichnet.
+async function exportMonthPDF(monthAnchor, entriesForDay) {
+  let jsPDF;
+  try {
+    jsPDF = await loadJsPDF();
+  } catch (e) {
+    window.alert(e.message || "PDF konnte nicht erstellt werden.");
+    return;
+  }
+  const year = monthAnchor.getFullYear();
+  const month = monthAnchor.getMonth();
+  const first = new Date(year, month, 1);
+  const gridStart = mondayOf(first);
+  const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+  const usedRows = cells.some((d, i) => i >= 35 && d.getMonth() === month) ? 6 : 5;
+  const shown = cells.slice(0, usedRows * 7);
+
+  const fieldShort = { p1: "P1", p2: "P2", p3: "P3" };
+  const zoneShort = { p2_voll: "ganz", h_ob: "Ob", h_ha: "Ha", v1: "V1", v2: "V2", v3: "V3", v4: "V4", h1: "H1", h2: "H2", voll: "" };
+
+  const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const W = 297, H = 210, M = 8;
+  const gridW = W - 2 * M;
+  const colW = gridW / 7;
+  const headerY = M + 8;
+  const gridTop = headerY + 6;
+  const gridH = H - gridTop - M;
+  const rowH = gridH / usedRows;
+
+  // Titel
+  pdf.setFont("helvetica", "bold"); pdf.setFontSize(15);
+  pdf.setTextColor(15, 110, 62);
+  pdf.text(`SV Dörfleins – Platzbelegung · ${MONTHS_PDF[month]} ${year}`, M, M + 4);
+
+  // Wochentagsköpfe
+  pdf.setFontSize(9); pdf.setTextColor(95, 94, 90);
+  WEEKDAYS.forEach((w, i) => { pdf.text(w, M + i * colW + 1.5, headerY + 3); });
+
+  const todayKeyStr = dayKey(new Date());
+  pdf.setDrawColor(200);
+
+  shown.forEach((d, idx) => {
+    const r = Math.floor(idx / 7), c = idx % 7;
+    const x = M + c * colW, y = gridTop + r * rowH;
+    const inMonth = d.getMonth() === month;
+    const isToday = dayKey(d) === todayKeyStr;
+    if (!inMonth) { pdf.setFillColor(245, 244, 239); pdf.rect(x, y, colW, rowH, "F"); }
+    else if (isToday) { pdf.setFillColor(238, 247, 240); pdf.rect(x, y, colW, rowH, "F"); }
+    pdf.rect(x, y, colW, rowH, "S");
+    // Datum
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(9);
+    pdf.setTextColor(inMonth ? 28 : 150, inMonth ? 28 : 150, inMonth ? 26 : 150);
+    pdf.text(String(d.getDate()), x + 1.5, y + 4);
+    // Einträge
+    const entries = entriesForDay(d).slice().sort((a, b) => a.start.localeCompare(b.start));
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(6.5);
+    let ey = y + 8;
+    const maxLines = Math.floor((rowH - 8) / 2.7);
+    entries.slice(0, maxLines).forEach((e) => {
+      const t = teamById(e.team);
+      if (t) { const col = hexToRgb(t.color); pdf.setFillColor(col.r, col.g, col.b); pdf.circle(x + 2, ey - 1, 0.7, "F"); }
+      pdf.setTextColor(40, 40, 40);
+      const z = zoneShort[e.zone] ? "·" + zoneShort[e.zone] : "";
+      let label = `${e.start} ${t ? t.name : e.team} ${fieldShort[e.field] || ""}${z}`;
+      label = pdf.splitTextToSize(label, colW - 4)[0];
+      pdf.text(label, x + 3.5, ey);
+      ey += 2.7;
+    });
+    if (entries.length > maxLines) {
+      pdf.setTextColor(120); pdf.text(`+${entries.length - maxLines} weitere`, x + 3.5, ey);
+    }
+  });
+
+  pdf.save(`Platzbelegung-${year}-${String(month + 1).padStart(2, "0")}.pdf`);
+}
+
+function hexToRgb(hex) {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || "#666666");
+  return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : { r: 102, g: 102, b: 102 };
+}
 
 export default function App() {
   const { user, authReady, isLoggedIn, role, isPlatzwart, isTrainer, myTeams, profile, loginEmail, resetPassword, logout, loginAdminPin, pinAdmin } = useAuth();
@@ -149,7 +245,10 @@ export default function App() {
           <button onClick={() => setCalMode("monat")} style={{ ...S.roleBtn, ...(calMode === "monat" ? S.roleBtnActive : {}) }}>Monat</button>
         </div>
         {calMode === "monat" && (
-          <button style={S.navBtn} className="no-print" onClick={() => window.print()}>🖨 Drucken</button>
+          <>
+            <button style={S.navBtn} className="no-print" onClick={() => window.print()}>🖨 Drucken</button>
+            <button style={S.navBtn} className="no-print" onClick={() => exportMonthPDF(monthAnchor, entriesForDay)}>⬇ Als PDF speichern</button>
+          </>
         )}
       </div>
 
@@ -650,6 +749,15 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
   const [tab, setTab] = useState("belegung");
   const pending = bookings.filter((b) => b.status === "beantragt" && b.date >= dayKey(new Date())).length;
   const openMsg = messages.filter((m) => !m.done && m.dir !== "out").length;
+  // Anzahl Tage mit Konflikten ab heute (für Badge am Reiter)
+  const conflictDayCount = (() => {
+    const today = dayKey(new Date());
+    const byDay = {};
+    bookings.filter((b) => b.status !== "beantragt" && b.date >= today).forEach((b) => { (byDay[b.date] ||= []).push(b); });
+    let n = 0;
+    Object.values(byDay).forEach((list) => { if (conflictIdsForEntries(list).size > 0) n++; });
+    return n;
+  })();
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
       <div style={S.adminTabs}>
@@ -658,6 +766,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
           ["spiel", "Heimspiel"],
           ["turnier", "Turnier"],
           ["verwalten", "Belegungen verwalten"],
+          ["konflikte", `Konflikte${conflictDayCount ? ` (${conflictDayCount})` : ""}`],
           ["sperre", "Platzsperre"],
           ["trainingstage", `Trainingstage${pending ? ` (${pending})` : ""}`],
           ["nachrichten", `Nachrichten${openMsg ? ` (${openMsg})` : ""}`],
@@ -670,10 +779,75 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       {tab === "spiel" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="match" />}
       {tab === "turnier" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="turnier" />}
       {tab === "verwalten" && <BookingManager bookings={bookings} removeBooking={removeBooking} removeSeries={removeSeries} onMove={onMove} />}
+      {tab === "konflikte" && <ConflictOverview bookings={bookings} removeBooking={removeBooking} onMove={onMove} />}
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDayApproval bookings={bookings} setBookingStatus={setBookingStatus} approveSeries={approveSeries} moveBooking={moveBooking} removeBooking={removeBooking} removeSeries={removeSeries} addMessage={addMessage} />}
       {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} users={users} />}
       {tab === "nutzer" && <UserManager users={users} saveUser={saveUser} setUserRole={setUserRole} setUserTeams={setUserTeams} removeUser={removeUser} />}
+    </div>
+  );
+}
+
+/* ---------------- Konfliktübersicht ---------------- */
+// Listet alle echten Doppelbelegungen ab heute, nach Tag gruppiert.
+function ConflictOverview({ bookings, removeBooking, onMove }) {
+  const today = dayKey(new Date());
+  const fmtDate = (dk) => {
+    const d = new Date(dk + "T12:00");
+    return `${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
+  };
+  // Belegungen ab heute nach Tag gruppieren (Anträge ausgenommen)
+  const byDay = {};
+  bookings
+    .filter((b) => b.status !== "beantragt" && b.date >= today)
+    .forEach((b) => { (byDay[b.date] ||= []).push(b); });
+
+  // Pro Tag die konkreten Konfliktpaare bestimmen
+  const days = Object.keys(byDay).sort();
+  const conflictDays = [];
+  days.forEach((dk) => {
+    const list = byDay[dk];
+    const pairs = [];
+    for (let i = 0; i < list.length; i++)
+      for (let j = i + 1; j < list.length; j++)
+        if (zonesOverlap(list[i], list[j]) && timeOverlap(list[i], list[j]))
+          pairs.push([list[i], list[j]]);
+    if (pairs.length) conflictDays.push({ dk, pairs });
+  });
+
+  const total = conflictDays.reduce((n, d) => n + d.pairs.length, 0);
+
+  const line = (b) => `${teamById(b.team)?.name || b.team} · ${fieldById(b.field)?.name} (${zoneText(b.field, b.zone)}) · ${b.start}–${b.end}${b.kind === "match" ? " · Heimspiel" : b.kind === "turnier" ? " · Turnier" : ""}`;
+
+  return (
+    <div>
+      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>
+        Übersicht aller Doppelbelegungen ab heute – also Termine, die sich denselben Platzbereich zur selben Zeit teilen. Du kannst direkt verschieben oder löschen.
+      </p>
+      {total === 0 && (
+        <div style={{ ...S.warnBanner, background: "#e1f5ee", color: C.ok, border: "1px solid #a9ddca" }}>
+          ✓ Keine Konflikte gefunden. Alle Belegungen ab heute sind überschneidungsfrei.
+        </div>
+      )}
+      {conflictDays.map(({ dk, pairs }) => (
+        <div key={dk} style={{ marginBottom: 16 }}>
+          <div style={S.subHead}>{fmtDate(dk)} · {pairs.length} Konflikt{pairs.length === 1 ? "" : "e"}</div>
+          {pairs.map(([a, b], idx) => (
+            <div key={idx} style={{ border: "1px solid #e7a5a5", background: "#fdf3f3", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+              <div style={{ fontSize: 13, marginBottom: 6 }}>⚠️ Überschneidung:</div>
+              {[a, b].map((bk) => (
+                <div key={bk.id} style={{ ...S.listRow, borderTop: "none", padding: "4px 0", flexWrap: "wrap" }}>
+                  <span style={{ flex: "1 1 240px", borderLeft: `3px solid ${teamById(bk.team)?.color || C.textSec}`, paddingLeft: 8 }}>{line(bk)}</span>
+                  <span style={{ display: "flex", gap: 6 }}>
+                    {onMove && <button style={S.navBtn} onClick={() => onMove(bk)}>Verschieben</button>}
+                    <button style={S.delBtn} onClick={() => { if (window.confirm(`Löschen?\n\n${line(bk)}`)) removeBooking(bk.id, bookings); }}>Löschen</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

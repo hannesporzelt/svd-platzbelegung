@@ -820,7 +820,7 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3, color: today ? C.brand : C.ink }}>{d.getDate()}</div>
               {anyLock.length > 0 && <div style={{ fontSize: 9, color: C.danger, marginBottom: 2 }}>⛔ gesperrt</div>}
               {notes && notes[dayKey(d)]?.text && (
-                <div style={{ fontSize: 8.5, color: "#7a5d00", background: "#fff8e1", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={notes[dayKey(d)].text}>
+                <div style={{ fontSize: 9, color: "#7a5d00", background: "#fff8e1", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.25, overflowWrap: "anywhere", wordBreak: "break-word" }} title={notes[dayKey(d)].text}>
                   📝 {notes[dayKey(d)].text}
                 </div>
               )}
@@ -832,9 +832,9 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
                     <div key={e.id}
                       onClick={deletable ? () => delEntry(e) : undefined}
                       title={deletable ? "Löschen" : undefined}
-                      style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, lineHeight: 1.2, cursor: deletable ? "pointer" : "default" }}>
-                      <span style={{ width: 7, height: 7, borderRadius: 2, background: t ? t.color : C.textSec, flex: "none" }} />
-                      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      style={{ display: "flex", alignItems: "flex-start", gap: 4, fontSize: 10, lineHeight: 1.25, cursor: deletable ? "pointer" : "default" }}>
+                      <span style={{ width: 7, height: 7, borderRadius: 2, background: t ? t.color : C.textSec, flex: "none", marginTop: 3 }} />
+                      <span style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>
                         {e.start} {t ? t.name : e.team} <span style={{ color: C.textSec }}>{fieldShort[e.field]}{zoneShort[e.zone] ? "·" + zoneShort[e.zone] : ""}</span>
                         {deletable && <span className="no-print" style={{ color: C.danger }}> ✕</span>}
                       </span>

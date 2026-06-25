@@ -6,7 +6,7 @@ import {
   zonesOverlap, timeOverlap,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
-import { useBookings, useLocks, useMessages, useUsers } from "./lib/data";
+import { useBookings, useLocks, useMessages, useUsers, useNotes } from "./lib/data";
 import { C, S } from "./lib/styles";
 import Pitch from "./components/Pitch";
 
@@ -114,6 +114,7 @@ export default function App() {
   const [showLogin, setShowLogin] = useState(false);
   const { bookings, bookingsReady, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries } = useBookings();
   const { locks, locksReady, addLock, removeLock } = useLocks();
+  const { notes, notesReady, setNote } = useNotes();
   const { messages, messagesReady, addMessage, setMessageDone, removeMessage } = useMessages();
   const { users, saveUser, setUserRole, setUserTeams, removeUser } = useUsers(isPlatzwart);
 
@@ -196,7 +197,7 @@ export default function App() {
     setShowLogin(true);
   };
 
-  const ready = bookingsReady && locksReady && messagesReady && authReady;
+  const ready = bookingsReady && locksReady && messagesReady && notesReady && authReady;
   if (!user || !ready)
     return (
       <div style={S.shell}>
@@ -275,6 +276,8 @@ export default function App() {
             isAdmin={isAdmin}
             removeBooking={removeBooking}
             onMove={setMoveTarget}
+            notes={notes}
+            setNote={setNote}
           />
 
           <div style={{ height: 16 }} />
@@ -297,6 +300,8 @@ export default function App() {
           lockForDayField={lockForDayField}
           isAdmin={isAdmin}
           removeBooking={removeBooking}
+          notes={notes}
+          setNote={setNote}
         />
       )}
 
@@ -490,7 +495,7 @@ function WeekNav({ weekStart, setWeekStart }) {
 }
 
 /* ---------------- Wochenraster ---------------- */
-function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove }) {
+function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove, notes, setNote }) {
   return (
     <div style={S.card} className="print-area">
       <div style={S.gridHead}>
@@ -510,24 +515,48 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
           const entries = all.filter((e) => e.field === activeField);
           const lock = lockForDayField(d, activeField);
           const today = dayKey(d) === dayKey(new Date());
+          const dk = dayKey(d);
+          const note = notes && notes[dk];
           return (
-            <div key={dayKey(d)} style={{ ...S.dayCol, ...(today ? S.dayToday : {}) }}>
+            <div key={dk} style={{ ...S.dayCol, ...(today ? S.dayToday : {}) }}>
               <div style={S.dayHead}>
                 <span style={{ fontWeight: 500 }}>{WEEKDAYS[(d.getDay() + 6) % 7]}</span>
                 <span style={{ color: C.textSec, fontSize: 12 }}>{d.getDate()}.{d.getMonth() + 1}.</span>
               </div>
               {lock && <div style={S.lockChip} title={lock.reason}>⛔ Gesperrt{lock.reason ? `: ${lock.reason}` : ""}</div>}
+              {note && note.text && <NoteChip text={note.text} />}
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {entries.length === 0 && !lock && <span style={{ color: C.textTer, fontSize: 12, padding: "4px 0" }}>frei</span>}
                 {entries.slice().sort((a, b) => a.start.localeCompare(b.start)).map((e) => (
                   <Chip key={e.id} entry={e} conflict={conflictIds.has(e.id)} isAdmin={isAdmin} removeBooking={removeBooking} onMove={onMove} />
                 ))}
               </div>
+              {isAdmin && setNote && (
+                <button
+                  className="no-print"
+                  onClick={() => {
+                    const eingabe = window.prompt(`Notiz für ${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}. (leer = löschen):`, note?.text || "");
+                    if (eingabe !== null) setNote(dk, eingabe);
+                  }}
+                  style={{ marginTop: 6, width: "100%", border: `1px dashed ${C.border}`, background: "transparent", color: C.textSec, cursor: "pointer", fontSize: 11, borderRadius: 6, padding: "3px 0" }}>
+                  {note?.text ? "✎ Notiz" : "+ Notiz"}
+                </button>
+              )}
             </div>
           );
         })}
       </div>
       <Legend />
+    </div>
+  );
+}
+
+// Tagesnotiz-Anzeige (gelb hinterlegt)
+function NoteChip({ text }) {
+  return (
+    <div style={{ background: "#fff8e1", border: "1px solid #f0e0a8", color: "#7a5d00", fontSize: 11, borderRadius: 6, padding: "4px 6px", marginBottom: 6, lineHeight: 1.35 }}
+      title={text}>
+      📝 {text}
     </div>
   );
 }
@@ -654,7 +683,7 @@ function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockFor
 /* ---------------- Monatsübersicht (druckbar) ---------------- */
 const MONTHS_LONG = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 
-function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField, isAdmin, removeBooking }) {
+function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField, isAdmin, removeBooking, notes, setNote }) {
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
   const shiftMonth = (delta) => { const d = new Date(year, month + delta, 1); setMonthAnchor(d); };
@@ -708,6 +737,11 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
             }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3, color: today ? C.brand : C.ink }}>{d.getDate()}</div>
               {anyLock.length > 0 && <div style={{ fontSize: 9, color: C.danger, marginBottom: 2 }}>⛔ gesperrt</div>}
+              {notes && notes[dayKey(d)]?.text && (
+                <div style={{ fontSize: 8.5, color: "#7a5d00", background: "#fff8e1", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={notes[dayKey(d)].text}>
+                  📝 {notes[dayKey(d)].text}
+                </div>
+              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 {entries.slice(0, 5).map((e) => {
                   const t = teamById(e.team);
@@ -767,6 +801,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
           ["turnier", "Turnier"],
           ["verwalten", "Belegungen verwalten"],
           ["konflikte", `Konflikte${conflictDayCount ? ` (${conflictDayCount})` : ""}`],
+          ["statistik", "Statistik"],
           ["sperre", "Platzsperre"],
           ["trainingstage", `Trainingstage${pending ? ` (${pending})` : ""}`],
           ["nachrichten", `Nachrichten${openMsg ? ` (${openMsg})` : ""}`],
@@ -780,6 +815,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       {tab === "turnier" && <BookingForm days={days} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} removeBooking={removeBooking} removeSeries={removeSeries} kind="turnier" />}
       {tab === "verwalten" && <BookingManager bookings={bookings} removeBooking={removeBooking} removeSeries={removeSeries} onMove={onMove} />}
       {tab === "konflikte" && <ConflictOverview bookings={bookings} removeBooking={removeBooking} onMove={onMove} />}
+      {tab === "statistik" && <StatsPanel bookings={bookings} />}
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDayApproval bookings={bookings} setBookingStatus={setBookingStatus} approveSeries={approveSeries} moveBooking={moveBooking} removeBooking={removeBooking} removeSeries={removeSeries} addMessage={addMessage} />}
       {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} users={users} />}
@@ -848,6 +884,98 @@ function ConflictOverview({ bookings, removeBooking, onMove }) {
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+/* ---------------- Statistik ---------------- */
+// Wertet die vorhandenen Belegungen aus: Stunden je Platz und je Mannschaft,
+// im wählbaren Zeitraum. Keine neue Datenbank nötig.
+function StatsPanel({ bookings }) {
+  const today = new Date();
+  const iso = (d) => dayKey(d);
+  const [from, setFrom] = useState(iso(new Date(today.getFullYear(), today.getMonth(), 1)));
+  const [to, setTo] = useState(iso(new Date(today.getFullYear(), today.getMonth() + 1, 0)));
+
+  const toMin = (t) => { const [h, m] = (t || "0:0").split(":").map(Number); return h * 60 + m; };
+  const list = bookings.filter((b) => b.status !== "beantragt" && b.date >= from && b.date <= to);
+
+  const hoursOf = (b) => Math.max(0, (toMin(b.end) - toMin(b.start))) / 60;
+
+  // je Platz
+  const perField = {};
+  FIELDS.forEach((f) => { perField[f.id] = 0; });
+  // je Mannschaft
+  const perTeam = {};
+  let totalH = 0, totalCount = list.length;
+  list.forEach((b) => {
+    const h = hoursOf(b);
+    totalH += h;
+    if (perField[b.field] != null) perField[b.field] += h;
+    perTeam[b.team] = (perTeam[b.team] || 0) + h;
+  });
+
+  const teamRows = Object.entries(perTeam)
+    .map(([id, h]) => ({ id, name: teamById(id)?.name || id, color: teamById(id)?.color || C.textSec, h }))
+    .sort((a, b) => b.h - a.h);
+  const maxTeamH = teamRows.reduce((m, r) => Math.max(m, r.h), 0) || 1;
+  const maxFieldH = Math.max(...Object.values(perField), 1);
+  const fmtH = (h) => h.toFixed(1).replace(".", ",") + " h";
+
+  const Bar = ({ value, max, color }) => (
+    <div style={{ background: "#eee9df", borderRadius: 4, height: 10, flex: 1, overflow: "hidden" }}>
+      <div style={{ width: `${Math.round((value / max) * 100)}%`, height: "100%", background: color, borderRadius: 4 }} />
+    </div>
+  );
+
+  return (
+    <div>
+      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>
+        Auswertung der eingetragenen Belegungen im gewählten Zeitraum (Anträge zählen nicht mit).
+      </p>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14, maxWidth: 420 }}>
+        <Field label="Von"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={S.select} /></Field>
+        <Field label="Bis"><input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={S.select} /></Field>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+        <div style={{ ...S.card, flex: "1 1 150px", textAlign: "center" }}>
+          <div style={{ fontSize: 26, fontWeight: 700, color: C.brand }}>{totalCount}</div>
+          <div style={{ fontSize: 12, color: C.textSec }}>Belegungen</div>
+        </div>
+        <div style={{ ...S.card, flex: "1 1 150px", textAlign: "center" }}>
+          <div style={{ fontSize: 26, fontWeight: 700, color: C.brand }}>{fmtH(totalH)}</div>
+          <div style={{ fontSize: 12, color: C.textSec }}>Gesamtstunden</div>
+        </div>
+      </div>
+
+      {totalCount === 0 && <p style={{ color: C.textSec, fontSize: 14 }}>Keine Belegungen im gewählten Zeitraum.</p>}
+
+      {totalCount > 0 && (
+        <>
+          <div style={S.subHead}>Auslastung je Platz</div>
+          <div style={{ marginBottom: 18 }}>
+            {FIELDS.map((f) => (
+              <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                <span style={{ width: 70, fontSize: 13 }}>{f.name}</span>
+                <Bar value={perField[f.id]} max={maxFieldH} color={C.brand} />
+                <span style={{ width: 60, fontSize: 12, color: C.textSec, textAlign: "right" }}>{fmtH(perField[f.id])}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={S.subHead}>Stunden je Mannschaft</div>
+          <div>
+            {teamRows.map((r) => (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                <span style={{ width: 110, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
+                <Bar value={r.h} max={maxTeamH} color={r.color} />
+                <span style={{ width: 60, fontSize: 12, color: C.textSec, textAlign: "right" }}>{fmtH(r.h)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -174,6 +174,27 @@ function hexToRgba(hex, alpha) {
 }
 
 export default function App() {
+  // ----- Theme (hell / dunkel / automatisch) -----
+  const [theme, setThemeState] = useState(() => {
+    try { return localStorage.getItem("svd_theme") || "auto"; } catch { return "auto"; }
+  });
+  React.useEffect(() => {
+    const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    const apply = () => {
+      const dark = theme === "dark" || (theme === "auto" && mq && mq.matches);
+      document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    };
+    apply();
+    if (theme === "auto" && mq) {
+      mq.addEventListener ? mq.addEventListener("change", apply) : mq.addListener(apply);
+      return () => { mq.removeEventListener ? mq.removeEventListener("change", apply) : mq.removeListener(apply); };
+    }
+  }, [theme]);
+  const setTheme = (t) => {
+    setThemeState(t);
+    try { localStorage.setItem("svd_theme", t); } catch { /* ignore */ }
+  };
+
   const { user, authReady, isLoggedIn, role, isPlatzwart, isTrainer, myTeams, profile, loginEmail, resetPassword, registerEmail, logout, loginAdminPin, pinAdmin } = useAuth();
   const isAdmin = isPlatzwart; // Kompatibilität: bestehender Code nutzt isAdmin = Platzwart-Rechte
   const [showLogin, setShowLogin] = useState(false);
@@ -317,10 +338,12 @@ export default function App() {
         onPrint={() => window.print()}
         onPdf={() => exportMonthPDF(monthAnchor, entriesForDay)}
         onWeekPdf={() => exportWeekPDF(days, entriesForDay)}
+        theme={theme}
+        setTheme={setTheme}
       />
 
       {pendingCount > 0 && (
-        <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>
+        <div style={{ ...S.warnBanner, background: "var(--c-info-bg, #eef4ff)", color: "#234", border: "1px solid #b9cdf0" }}>
           📬 {pendingCount} Trainingstag-Antrag{pendingCount === 1 ? "" : "-anträge"} zur Freigabe{isAdmin ? " – im Platzwart-Bereich unter „Trainingstage“ prüfen." : ". Der Platzwart gibt sie frei."}
         </div>
       )}
@@ -451,7 +474,7 @@ export default function App() {
 }
 
 /* ---------------- Header ---------------- */
-function Header({ view, setView, isAdmin, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf, onWeekPdf }) {
+function Header({ view, setView, isAdmin, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf, onWeekPdf, theme, setTheme }) {
   const [menuOpen, setMenuOpen] = useState(false);
   // Welche Teams darf der Trainer im Dropdown wählen?
   const teamOptions = (role === "trainer" && myTeams.length > 0)
@@ -517,6 +540,19 @@ function Header({ view, setView, isAdmin, isLoggedIn, role, myTeams, profile, on
                         {teamOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
                     </div>
+                  </>
+                )}
+
+                {setTheme && (
+                  <>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Darstellung</div>
+                    {[["auto", "Automatisch"], ["light", "Hell"], ["dark", "Dunkel"]].map(([k, l]) => (
+                      <button key={k} onClick={() => { setTheme(k); }}
+                        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left", border: "none", background: theme === k ? C.brand : "transparent", color: theme === k ? "#fff" : C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>
+                        <span>{l}</span>
+                        {theme === k && <span style={{ fontSize: 12 }}>✓</span>}
+                      </button>
+                    ))}
                   </>
                 )}
               </div>
@@ -1161,7 +1197,7 @@ function ConflictOverview({ bookings, removeBooking, onMove }) {
         <div key={dk} style={{ marginBottom: 16 }}>
           <div style={S.subHead}>{fmtDate(dk)} · {pairs.length} Konflikt{pairs.length === 1 ? "" : "e"}</div>
           {pairs.map(([a, b], idx) => (
-            <div key={idx} style={{ border: "1px solid #e7a5a5", background: "#fdf3f3", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+            <div key={idx} style={{ border: "1px solid #e7a5a5", background: "var(--c-danger-bg, #fdf3f3)", borderRadius: 8, padding: 10, marginBottom: 8 }}>
               <div style={{ fontSize: 13, marginBottom: 6 }}>⚠️ Überschneidung:</div>
               {[a, b].map((bk) => (
                 <div key={bk.id} style={{ ...S.listRow, borderTop: "none", padding: "4px 0", flexWrap: "wrap" }}>
@@ -1370,7 +1406,7 @@ function MessageInbox({ messages, setMessageDone, removeMessage, users, addMessa
 
   return (
     <div>
-      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, marginBottom: 18, background: "#fafaf7" }}>
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, marginBottom: 18, background: "var(--c-soft, #fafaf7)" }}>
         <div style={S.subHead}>Nachricht an Trainer senden</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
           <select value={target} onChange={(e) => setTarget(e.target.value)} style={{ ...S.select, width: "auto", minWidth: 200 }}>
@@ -1691,7 +1727,7 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
         }
         return (
           <>
-            <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>
+            <div style={{ ...S.warnBanner, background: "var(--c-info-bg, #eef4ff)", color: "#234", border: "1px solid #b9cdf0" }}>
               Anstoß <b>{start}</b>, Ende {end}.{" "}
               {wb
                 ? <>Aufwärmen auf <b>{fieldById(wf)?.name}</b> ({wb.start}–{wb.end}). Spielplatz {fieldById(field)?.name} belegt {start}–{spielEnd}.</>
@@ -1715,7 +1751,7 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
         </div>
       )}
       {mode === "series" && !timeInvalid && (
-        <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>
+        <div style={{ ...S.warnBanner, background: "var(--c-info-bg, #eef4ff)", color: "#234", border: "1px solid #b9cdf0" }}>
           Serie: <b>{seriesDates.length}</b> {WEEKDAYS_LONG[weekday]}-Termine im gewählten Zeitraum. Konflikte werden beim Anlegen geprüft.
         </div>
       )}
@@ -2099,7 +2135,7 @@ function TrainerBookingForm({ trainerTeam, bookings, bookingsByDay, addBooking, 
         </div>
       )}
       {mode === "series" && !timeInvalid && (
-        <div style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0" }}>
+        <div style={{ ...S.warnBanner, background: "var(--c-info-bg, #eef4ff)", color: "#234", border: "1px solid #b9cdf0" }}>
           {seriesDates.length} {WEEKDAYS_LONG[weekday]}-Termine im Zeitraum.{seriesConflicts.length > 0 ? ` ⚠️ ${seriesConflicts.length} davon bereits belegt.` : ""}
         </div>
       )}
@@ -2153,7 +2189,7 @@ function MessageForm({ trainerTeam, addMessage, messages, myUid, myTeams }) {
         <div style={{ marginBottom: 16 }}>
           <div style={S.subHead}>Nachrichten vom Platzwart</div>
           {incoming.map((m) => (
-            <div key={m.id} style={{ ...S.warnBanner, background: "#eef4ff", color: "#234", border: "1px solid #b9cdf0", display: "block" }}>
+            <div key={m.id} style={{ ...S.warnBanner, background: "var(--c-info-bg, #eef4ff)", color: "#234", border: "1px solid #b9cdf0", display: "block" }}>
               {m.text} <span style={{ fontSize: 11, color: C.textSec }}>· {fmtTs(m.ts)}</span>
             </div>
           ))}

@@ -37,3 +37,40 @@ input, select { font-family: inherit; }
   /* Umbrüche in Kalenderzellen vermeiden */
   .print-area * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* ===================== Dark Mode ===================== */
+/* Hell ist Standard (Fallback-Werte in var()). Dunkel überschreibt die Tokens. */
+:root[data-theme="dark"] {
+  --c-bg: #15171a;
+  --c-surface: #1e2125;
+  --c-ink: #e8e6e1;
+  --c-text-sec: #a9a7a1;
+  --c-text-ter: #7d7b75;
+  --c-border: rgba(255,255,255,.14);
+  --c-brand: #2f9e63;
+  --c-brand-dark: #1d6b43;
+  --c-ok: #34b88e;
+  --c-danger: #e07a7a;
+  --c-switch: #2a2e33;
+  --c-daycol: #23262b;
+  --c-badge-bg: #2a2e33;
+  --c-danger-bg: #3a2526;
+  --c-ok-bg: #1d352e;
+}
+:root[data-theme="dark"] body { background: #15171a; color: #e8e6e1; }
+
+/* Sanfter Übergang beim Umschalten */
+body, .print-area, input, select, textarea, button { transition: background-color .2s ease, color .2s ease, border-color .2s ease; }
+
+/* Beim Drucken immer hell erzwingen (Tinte/Lesbarkeit) */
+@media print {
+  :root[data-theme="dark"] { --c-bg:#fff; --c-surface:#fff; --c-ink:#1c1c1a; --c-text-sec:#5f5e5a; --c-text-ter:#8a8980; --c-border:rgba(0,0,0,.12); --c-daycol:#fbfaf6; --c-switch:#e7e4db; --c-badge-bg:#eee9df; }
+  :root[data-theme="dark"] body { background:#fff; color:#1c1c1a; }
+}
+
+/* Weitere Tönungen für Banner/Karten (hell = Fallback, dunkel hier) */
+:root[data-theme="dark"] {
+  --c-info-bg: #1b2b3d;
+  --c-note-bg: #3a3320;
+  --c-soft: #202327;
+}

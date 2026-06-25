@@ -1,15 +1,18 @@
-// Farb- und Style-Tokens, zentral
+// Farb- und Style-Tokens, zentral.
+// Die Farben verweisen auf CSS-Variablen (in index.css definiert), damit der
+// Dark Mode per data-theme="dark" am <html> umgeschaltet werden kann.
+// Der zweite Wert in var(... , FALLBACK) ist die Hell-Farbe als Rückfall.
 export const C = {
-  bg: "#f4f2ec",
-  surface: "#ffffff",
-  ink: "#1c1c1a",
-  textSec: "#5f5e5a",
-  textTer: "#8a8980",
-  border: "rgba(0,0,0,.12)",
-  brand: "#0f6e3e",
-  brandDark: "#0a4f2d",
-  ok: "#0f6e56",
-  danger: "#a32d2d",
+  bg: "var(--c-bg, #f4f2ec)",
+  surface: "var(--c-surface, #ffffff)",
+  ink: "var(--c-ink, #1c1c1a)",
+  textSec: "var(--c-text-sec, #5f5e5a)",
+  textTer: "var(--c-text-ter, #8a8980)",
+  border: "var(--c-border, rgba(0,0,0,.12))",
+  brand: "var(--c-brand, #0f6e3e)",
+  brandDark: "var(--c-brand-dark, #0a4f2d)",
+  ok: "var(--c-ok, #0f6e56)",
+  danger: "var(--c-danger, #a32d2d)",
 };
 
 export const S = {
@@ -18,7 +21,7 @@ export const S = {
   crest: { width: 44, height: 44, borderRadius: 10, background: C.brand, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, letterSpacing: ".5px", fontSize: 14 },
   h1: { margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: "-.2px" },
   sub: { margin: 0, fontSize: 13, color: C.textSec },
-  roleSwitch: { display: "flex", background: "#e7e4db", borderRadius: 10, padding: 3 },
+  roleSwitch: { display: "flex", background: "var(--c-switch, #e7e4db)", borderRadius: 10, padding: 3 },
   roleBtn: { border: "none", background: "transparent", padding: "7px 12px", borderRadius: 8, cursor: "pointer", fontSize: 13, color: C.textSec, fontWeight: 500 },
   roleBtnActive: { background: C.surface, color: C.ink, boxShadow: "0 1px 2px rgba(0,0,0,.08)" },
   select: { padding: "8px 10px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.surface, fontSize: 13, color: C.ink, minHeight: 36, boxSizing: "border-box", width: "100%" },
@@ -30,12 +33,12 @@ export const S = {
   tab: { border: `1px solid ${C.border}`, background: C.surface, padding: "6px 12px", borderRadius: 999, cursor: "pointer", fontSize: 13, color: C.textSec },
   tabActive: { background: C.brand, color: "#fff", borderColor: C.brand, padding: "6px 12px", borderRadius: 999, fontSize: 13 },
   weekRow: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 8 },
-  dayCol: { background: "#fbfaf6", border: `1px solid ${C.border}`, borderRadius: 10, padding: 8, minHeight: 110 },
+  dayCol: { background: "var(--c-daycol, #fbfaf6)", border: `1px solid ${C.border}`, borderRadius: 10, padding: 8, minHeight: 110 },
   dayToday: { borderColor: C.brand, boxShadow: `0 0 0 2px ${C.brand}22` },
   dayHead: { display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 },
   chip: { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 7px" },
-  zoneBadge: { fontSize: 10, background: "#eee9df", borderRadius: 5, padding: "1px 5px", color: C.textSec, alignSelf: "flex-start" },
-  lockChip: { background: "#fbeaea", color: C.danger, fontSize: 11, borderRadius: 6, padding: "3px 6px", marginBottom: 6, fontWeight: 500 },
+  zoneBadge: { fontSize: 10, background: "var(--c-badge-bg, #eee9df)", borderRadius: 5, padding: "1px 5px", color: C.textSec, alignSelf: "flex-start" },
+  lockChip: { background: "var(--c-danger-bg, #fbeaea)", color: C.danger, fontSize: 11, borderRadius: 6, padding: "3px 6px", marginBottom: 6, fontWeight: 500 },
   legend: { display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: C.textSec },
   legItem: { display: "flex", alignItems: "center", gap: 5 },
   legDot: { width: 10, height: 10, borderRadius: 3, display: "inline-block", flex: "none" },
@@ -47,12 +50,12 @@ export const S = {
   formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px,1fr))", gap: 10, marginBottom: 12 },
   primaryBtn: { background: C.brand, color: "#fff", border: "none", padding: "10px 16px", borderRadius: 9, cursor: "pointer", fontSize: 14, fontWeight: 500 },
   btnDisabled: { background: "#c2c0b8", cursor: "not-allowed" },
-  warnBanner: { background: "#fbeaea", color: C.danger, border: "1px solid #e7a5a5", borderRadius: 8, padding: "9px 12px", fontSize: 13, marginBottom: 12, lineHeight: 1.5 },
+  warnBanner: { background: "var(--c-danger-bg, #fbeaea)", color: C.danger, border: "1px solid #e7a5a5", borderRadius: 8, padding: "9px 12px", fontSize: 13, marginBottom: 12, lineHeight: 1.5 },
   subHead: { fontSize: 13, fontWeight: 600, color: C.textSec, marginBottom: 8 },
   listRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "8px 0", borderTop: `1px solid ${C.border}`, fontSize: 13 },
-  delBtn: { background: "#fbeaea", color: C.danger, border: "none", padding: "5px 10px", borderRadius: 7, cursor: "pointer", fontSize: 12 },
-  okBtn: { background: "#e1f5ee", color: C.ok, border: "none", padding: "5px 10px", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 500 },
+  delBtn: { background: "var(--c-danger-bg, #fbeaea)", color: C.danger, border: "none", padding: "5px 10px", borderRadius: 7, cursor: "pointer", fontSize: 12 },
+  okBtn: { background: "var(--c-ok-bg, #e1f5ee)", color: C.ok, border: "none", padding: "5px 10px", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 500 },
   wishRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "10px 0", borderTop: `1px solid ${C.border}`, fontSize: 13 },
-  badge: { background: "#fbeaea", color: C.danger, borderRadius: 999, fontSize: 11, padding: "1px 7px", fontWeight: 600, marginLeft: 4 },
+  badge: { background: "var(--c-danger-bg, #fbeaea)", color: C.danger, borderRadius: 999, fontSize: 11, padding: "1px 7px", fontWeight: 600, marginLeft: 4 },
   footer: { marginTop: 18, textAlign: "center", fontSize: 12, color: C.textTer, lineHeight: 1.6 },
 };

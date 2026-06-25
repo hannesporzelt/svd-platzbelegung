@@ -174,7 +174,7 @@ export default function App() {
   // Admin-Hinweise: offene Anträge (beantragte Trainingstage, ab heute) + Konflikte + Nachrichten
   const todayKeyTop = dayKey(new Date());
   const pendingCount = bookings.filter((b) => b.status === "beantragt" && b.date >= todayKeyTop).length;
-  const openMsgCount = messages.filter((m) => !m.done).length;
+  const openMsgCount = messages.filter((m) => !m.done && m.dir !== "out").length;
   // Neue Nachrichten vom Platzwart an den eingeloggten Trainer (für Login-Hinweis)
   const trainerInbox = (isTrainer && user?.uid)
     ? messages.filter((m) =>

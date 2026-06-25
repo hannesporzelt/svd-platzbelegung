@@ -241,6 +241,10 @@ export default function App() {
         setTrainerTeam={setTrainerTeam}
         notices={pendingCount + weekConflictCount + openMsgCount}
         requestCount={pendingCount}
+        calMode={calMode}
+        setCalMode={setCalMode}
+        onPrint={() => window.print()}
+        onPdf={() => exportMonthPDF(monthAnchor, entriesForDay)}
       />
 
       {pendingCount > 0 && (
@@ -255,19 +259,6 @@ export default function App() {
           <button style={{ ...S.navBtn, whiteSpace: "nowrap" }} onClick={() => { setView("trainer"); setMsgsSeen(true); }}>Nachrichten ansehen</button>
         </div>
       )}
-
-      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <div style={S.roleSwitch}>
-          <button onClick={() => setCalMode("woche")} style={{ ...S.roleBtn, ...(calMode === "woche" ? S.roleBtnActive : {}) }}>Woche</button>
-          <button onClick={() => setCalMode("monat")} style={{ ...S.roleBtn, ...(calMode === "monat" ? S.roleBtnActive : {}) }}>Monat</button>
-        </div>
-        {calMode === "monat" && (
-          <>
-            <button style={S.navBtn} className="no-print" onClick={() => window.print()}>🖨 Drucken</button>
-            <button style={S.navBtn} className="no-print" onClick={() => exportMonthPDF(monthAnchor, entriesForDay)}>⬇ Als PDF speichern</button>
-          </>
-        )}
-      </div>
 
       {calMode === "woche" && (
         <>
@@ -385,36 +376,81 @@ export default function App() {
 }
 
 /* ---------------- Header ---------------- */
-function Header({ view, setView, isAdmin, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount }) {
+function Header({ view, setView, isAdmin, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   // Welche Teams darf der Trainer im Dropdown wählen?
-  // Eingeloggter Trainer: nur seine zugeordneten Teams. Platzwart/Notfall: alle.
   const teamOptions = (role === "trainer" && myTeams.length > 0)
     ? TEAMS.filter((t) => myTeams.includes(t.id))
     : TEAMS;
+  // Rollenanzeige rechts oben
+  const roleLabel = view === "admin" ? "Platzwart" : view === "trainer" ? "Trainer" : "Betrachter";
+
+  const ROLES = [["viewer", "Betrachter"], ["trainer", "Trainer"], ["admin", "Platzwart"]];
+  const close = () => setMenuOpen(false);
+
   return (
     <header style={S.header}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* Hauptmenü-Knopf */}
+        <div style={{ position: "relative" }} className="no-print">
+          <button onClick={() => setMenuOpen((o) => !o)} aria-label="Menü"
+            style={{ ...S.navBtn, fontSize: 18, lineHeight: 1, padding: "8px 12px", position: "relative" }}>
+            ☰{requestCount > 0 && <span style={{ ...S.badge, position: "absolute", top: -6, right: -6 }}>{requestCount}</span>}
+          </button>
+          {menuOpen && (
+            <>
+              <div onClick={close} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+              <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, minWidth: 230, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 8px 28px rgba(0,0,0,0.16)", padding: 8 }}>
+                <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "6px 8px 2px" }}>Ansicht</div>
+                {[["woche", "Woche"], ["monat", "Monat"]].map(([k, l]) => (
+                  <button key={k} onClick={() => { setCalMode(k); close(); }}
+                    style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: calMode === k ? C.brand : "transparent", color: calMode === k ? "#fff" : C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>
+                    {l}
+                  </button>
+                ))}
+
+                {calMode === "monat" && (
+                  <>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Monatsplan</div>
+                    <button onClick={() => { close(); onPrint && onPrint(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>🖨 Drucken</button>
+                    <button onClick={() => { close(); onPdf && onPdf(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>⬇ Als PDF speichern</button>
+                  </>
+                )}
+
+                <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Rolle</div>
+                {ROLES.map(([k, l]) => (
+                  <button key={k} onClick={() => { setView(k); close(); }}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left", border: "none", background: view === k ? C.brand : "transparent", color: view === k ? "#fff" : C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>
+                    <span>{l}</span>
+                    {k === "admin" && requestCount > 0 && <span style={{ ...S.badge, ...(view === k ? { background: "#fff", color: C.brand } : {}) }}>{requestCount}</span>}
+                  </button>
+                ))}
+
+                {view === "trainer" && (
+                  <>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Mannschaft</div>
+                    <div style={{ padding: "2px 6px 6px" }}>
+                      <select value={trainerTeam} onChange={(e) => setTrainerTeam(e.target.value)} style={S.select}>
+                        {teamOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
         <div style={S.crest}>SVD</div>
         <div>
           <h1 style={S.h1}>SV Dörfleins</h1>
           <p style={S.sub}>Platzbelegung &amp; Trainingsplan</p>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={S.roleSwitch}>
-          {[["viewer", "Betrachter"], ["trainer", "Trainer"], ["admin", "Platzwart"]].map(([k, label]) => (
-            <button key={k} onClick={() => setView(k)} style={{ ...S.roleBtn, ...(view === k ? S.roleBtnActive : {}) }}
-              title={k === "admin" && requestCount > 0 ? `${requestCount} Buchungsantrag/-anträge eingegangen` : undefined}>
-              {label}
-              {k === "admin" && requestCount > 0 && <span style={S.badge}>{requestCount}</span>}
-            </button>
-          ))}
-        </div>
-        {view === "trainer" && (
-          <select value={trainerTeam} onChange={(e) => setTrainerTeam(e.target.value)} style={{ ...S.select, width: "auto" }}>
-            {teamOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        )}
+
+      {/* Rechts: aktuelle Rolle + Anmelden/Abmelden (immer sichtbar) */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }} className="no-print">
+        <span style={{ fontSize: 12, color: C.textSec }}>{roleLabel}</span>
         {isLoggedIn ? (
           <button style={S.navBtn} onClick={logoutAdmin} title={profile?.name || profile?.email || ""}>Abmelden</button>
         ) : (

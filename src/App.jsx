@@ -8,6 +8,7 @@ import {
 import { useAuth } from "./lib/auth";
 import { useBookings, useLocks, useMessages, useUsers, useNotes } from "./lib/data";
 import { C, S } from "./lib/styles";
+import { ferienAn, feiertagAn } from "./lib/feiertage";
 import Pitch from "./components/Pitch";
 
 // Hinweistext für Trainer, wenn der gewünschte Slot belegt ist
@@ -101,6 +102,66 @@ async function exportMonthPDF(monthAnchor, entriesForDay) {
   });
 
   pdf.save(`Platzbelegung-${year}-${String(month + 1).padStart(2, "0")}.pdf`);
+}
+
+// Wochenplan als PDF (DIN A4 quer): 7 Tagesspalten mit den Einträgen.
+async function exportWeekPDF(weekDays, entriesForDay) {
+  let jsPDF;
+  try {
+    jsPDF = await loadJsPDF();
+  } catch (e) {
+    window.alert(e.message || "PDF konnte nicht erstellt werden.");
+    return;
+  }
+  const fieldShort = { p1: "P1", p2: "P2", p3: "P3" };
+  const zoneShort = { p2_voll: "ganz", h_ob: "Ob", h_ha: "Ha", v1: "V1", v2: "V2", v3: "V3", v4: "V4", h1: "H1", h2: "H2", voll: "" };
+
+  const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const W = 297, H = 210, M = 8;
+  const gridW = W - 2 * M;
+  const colW = gridW / 7;
+  const titleY = M + 4;
+  const headTop = M + 8;
+  const headH = 7;
+  const gridTop = headTop + headH;
+  const gridH = H - gridTop - M;
+
+  const mon = weekDays[0], sun = weekDays[6];
+  const fmt = (d) => `${d.getDate()}.${d.getMonth() + 1}.`;
+  pdf.setFont("helvetica", "bold"); pdf.setFontSize(14); pdf.setTextColor(15, 110, 62);
+  pdf.text(`SV Dörfleins – Platzbelegung · Woche ${fmt(mon)}–${fmt(sun)}${sun.getFullYear()}`, M, titleY);
+
+  const todayKeyStr = dayKey(new Date());
+  weekDays.forEach((d, i) => {
+    const x = M + i * colW;
+    const isToday = dayKey(d) === todayKeyStr;
+    // Kopf
+    pdf.setFillColor(isToday ? 225 : 240, isToday ? 240 : 240, isToday ? 230 : 240);
+    pdf.rect(x, headTop, colW, headH, "F");
+    pdf.setDrawColor(200); pdf.rect(x, headTop, colW, headH, "S");
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(8); pdf.setTextColor(40, 40, 40);
+    pdf.text(`${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}.`, x + 1.5, headTop + 4.8);
+    // Spaltenkörper
+    pdf.rect(x, gridTop, colW, gridH, "S");
+    const entries = entriesForDay(d).slice().sort((a, b) => a.start.localeCompare(b.start));
+    let ey = gridTop + 5;
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(7);
+    entries.forEach((e) => {
+      if (ey > gridTop + gridH - 3) return;
+      const t = teamById(e.team);
+      if (t) { const col = hexToRgb(t.color); pdf.setFillColor(col.r, col.g, col.b); pdf.circle(x + 2, ey - 1.2, 0.8, "F"); }
+      pdf.setTextColor(30, 30, 30);
+      const z = zoneShort[e.zone] ? "·" + zoneShort[e.zone] : "";
+      const line1 = `${e.start} ${t ? t.name : e.team}`;
+      const line2 = `${fieldShort[e.field] || ""}${z}${e.kind === "match" ? " · Heimspiel" : e.kind === "turnier" ? " · Turnier" : ""}`;
+      pdf.text(pdf.splitTextToSize(line1, colW - 5)[0], x + 3.6, ey);
+      ey += 3.1;
+      if (ey <= gridTop + gridH - 3) { pdf.setTextColor(110, 110, 110); pdf.text(pdf.splitTextToSize(line2, colW - 5)[0], x + 3.6, ey); ey += 3.6; }
+    });
+    if (entries.length === 0) { pdf.setTextColor(150, 150, 150); pdf.text("frei", x + 3.6, gridTop + 5); }
+  });
+
+  pdf.save(`Platzbelegung-Woche-${dayKey(mon)}.pdf`);
 }
 
 function hexToRgb(hex) {
@@ -255,6 +316,7 @@ export default function App() {
         setCalMode={setCalMode}
         onPrint={() => window.print()}
         onPdf={() => exportMonthPDF(monthAnchor, entriesForDay)}
+        onWeekPdf={() => exportWeekPDF(days, entriesForDay)}
       />
 
       {pendingCount > 0 && (
@@ -389,7 +451,7 @@ export default function App() {
 }
 
 /* ---------------- Header ---------------- */
-function Header({ view, setView, isAdmin, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf }) {
+function Header({ view, setView, isAdmin, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf, onWeekPdf }) {
   const [menuOpen, setMenuOpen] = useState(false);
   // Welche Teams darf der Trainer im Dropdown wählen?
   const teamOptions = (role === "trainer" && myTeams.length > 0)
@@ -427,6 +489,14 @@ function Header({ view, setView, isAdmin, isLoggedIn, role, myTeams, profile, on
                     <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Monatsplan</div>
                     <button onClick={() => { close(); onPrint && onPrint(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>🖨 Drucken</button>
                     <button onClick={() => { close(); onPdf && onPdf(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>⬇ Als PDF speichern</button>
+                  </>
+                )}
+
+                {calMode === "woche" && (
+                  <>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Wochenplan</div>
+                    <button onClick={() => { close(); onPrint && onPrint(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>🖨 Drucken</button>
+                    <button onClick={() => { close(); onWeekPdf && onWeekPdf(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>⬇ Woche als PDF</button>
                   </>
                 )}
 
@@ -669,6 +739,8 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
                 <span style={{ fontWeight: 500 }}>{WEEKDAYS[(d.getDay() + 6) % 7]}</span>
                 <span style={{ color: C.textSec, fontSize: 12 }}>{d.getDate()}.{d.getMonth() + 1}.</span>
               </div>
+              {feiertagAn(d) && <div style={{ fontSize: 10, color: "#7a3f00", background: "#ffe8cc", borderRadius: 5, padding: "2px 5px", marginBottom: 4, fontWeight: 500 }} title="Gesetzlicher Feiertag">🎌 {feiertagAn(d)}</div>}
+              {!feiertagAn(d) && ferienAn(d) && <div style={{ fontSize: 10, color: "#1d6b4f", background: "#e1f3ea", borderRadius: 5, padding: "2px 5px", marginBottom: 4 }} title="Schulferien Bayern">🏖️ {ferienAn(d)}</div>}
               {lock && <div style={S.lockChip} title={lock.reason}>⛔ Gesperrt{lock.reason ? `: ${lock.reason}` : ""}</div>}
               {note && note.text && <NoteChip text={note.text} />}
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -907,6 +979,8 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
               opacity: inMonth ? 1 : 0.55,
             }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3, color: today ? C.brand : C.ink }}>{d.getDate()}</div>
+              {feiertagAn(d) && <div style={{ fontSize: 8.5, color: "#7a3f00", background: "#ffe8cc", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, overflowWrap: "anywhere" }} title="Feiertag">{feiertagAn(d)}</div>}
+              {!feiertagAn(d) && ferienAn(d) && <div style={{ fontSize: 8.5, color: "#1d6b4f", background: "#e1f3ea", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, overflowWrap: "anywhere" }} title="Schulferien">{ferienAn(d)}</div>}
               {anyLock.length > 0 && <div style={{ fontSize: 9, color: C.danger, marginBottom: 2 }}>⛔ gesperrt</div>}
               {notes && notes[dayKey(d)]?.text && (
                 <div style={{ fontSize: 9, color: "#7a5d00", background: "#fff8e1", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.25, overflowWrap: "anywhere", wordBreak: "break-word" }} title={notes[dayKey(d)].text}>

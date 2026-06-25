@@ -107,6 +107,10 @@ function hexToRgb(hex) {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || "#666666");
   return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : { r: 102, g: 102, b: 102 };
 }
+function hexToRgba(hex, alpha) {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 export default function App() {
   const { user, authReady, isLoggedIn, role, isPlatzwart, isTrainer, myTeams, profile, loginEmail, resetPassword, registerEmail, logout, loginAdminPin, pinAdmin } = useAuth();
@@ -130,6 +134,12 @@ export default function App() {
   }, [isTrainer, myTeams]); // eslint-disable-line react-hooks/exhaustive-deps
   const [weekStart, setWeekStart] = useState(mondayOf(new Date()));
   const [activeField, setActiveField] = useState("p2");
+  const [teamFilter, setTeamFilter] = useState("all"); // "all" | "mine" | teamId
+  // Trainer sehen beim Anmelden zunächst nur ihre Mannschaften
+  React.useEffect(() => {
+    if (isTrainer && myTeams && myTeams.length > 0) setTeamFilter("mine");
+    else setTeamFilter("all");
+  }, [isTrainer, myTeams]);
   const [calMode, setCalMode] = useState("woche"); // woche | monat
   const [monthAnchor, setMonthAnchor] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); return d; });
   const [moveTarget, setMoveTarget] = useState(null); // Belegung, die im Plan verschoben wird
@@ -285,6 +295,9 @@ export default function App() {
             onMove={setMoveTarget}
             notes={notes}
             setNote={setNote}
+            teamFilter={teamFilter}
+            setTeamFilter={setTeamFilter}
+            myTeams={myTeams}
           />
 
           <div style={{ height: 16 }} />
@@ -441,7 +454,7 @@ function Header({ view, setView, isAdmin, isLoggedIn, role, myTeams, profile, on
           )}
         </div>
 
-        <div style={S.crest}>SVD</div>
+        <img src="/logo.png" alt="SV Dörfleins" style={{ width: 46, height: 46, objectFit: "contain", flex: "none" }} />
         <div>
           <h1 style={S.h1}>SV Dörfleins</h1>
           <p style={S.sub}>Platzbelegung &amp; Trainingsplan</p>
@@ -604,7 +617,14 @@ function WeekNav({ weekStart, setWeekStart }) {
 }
 
 /* ---------------- Wochenraster ---------------- */
-function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove, notes, setNote }) {
+function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove, notes, setNote, teamFilter, setTeamFilter, myTeams }) {
+  // Filter-Funktion: entscheidet, ob ein Eintrag angezeigt wird
+  const matchesFilter = (e) => {
+    if (!teamFilter || teamFilter === "all") return true;
+    if (teamFilter === "mine") return myTeams && myTeams.includes(e.team);
+    return e.team === teamFilter;
+  };
+  const filterActive = teamFilter && teamFilter !== "all";
   return (
     <div style={S.card} className="print-area">
       <div style={S.gridHead}>
@@ -617,11 +637,28 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
           ))}
         </div>
       </div>
+      {/* Mannschafts-Filter */}
+      <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, color: C.textSec }}>Mannschaft:</span>
+        <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} style={{ ...S.select, width: "auto", minWidth: 160 }}>
+          <option value="all">Alle Mannschaften</option>
+          {myTeams && myTeams.length > 0 && <option value="mine">Nur meine Mannschaften</option>}
+          {TEAMS.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        {filterActive && (
+          <button onClick={() => setTeamFilter("all")}
+            style={{ border: `1px solid ${C.border}`, background: C.surface, color: C.textSec, cursor: "pointer", fontSize: 12, borderRadius: 999, padding: "4px 10px" }}>
+            ✕ Filter zurücksetzen
+          </button>
+        )}
+      </div>
       <div style={S.weekRow}>
         {days.map((d) => {
           const all = entriesForDay(d);
           const conflictIds = conflictIdsForEntries(all);
-          const entries = all.filter((e) => e.field === activeField);
+          const fieldEntries = all.filter((e) => e.field === activeField);
+          const entries = fieldEntries.filter(matchesFilter);
+          const hiddenCount = fieldEntries.length - entries.length;
           const lock = lockForDayField(d, activeField);
           const today = dayKey(d) === dayKey(new Date());
           const dk = dayKey(d);
@@ -635,10 +672,17 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
               {lock && <div style={S.lockChip} title={lock.reason}>⛔ Gesperrt{lock.reason ? `: ${lock.reason}` : ""}</div>}
               {note && note.text && <NoteChip text={note.text} />}
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {entries.length === 0 && !lock && <span style={{ color: C.textTer, fontSize: 12, padding: "4px 0" }}>frei</span>}
+                {entries.length === 0 && !lock && (
+                  <span style={{ color: C.textTer, fontSize: 12, padding: "4px 0" }}>
+                    {filterActive && hiddenCount > 0 ? "—" : "frei"}
+                  </span>
+                )}
                 {entries.slice().sort((a, b) => a.start.localeCompare(b.start)).map((e) => (
                   <Chip key={e.id} entry={e} conflict={conflictIds.has(e.id)} isAdmin={isAdmin} removeBooking={removeBooking} onMove={onMove} />
                 ))}
+                {filterActive && hiddenCount > 0 && (
+                  <span style={{ color: C.textTer, fontSize: 10, fontStyle: "italic" }}>{hiddenCount} ausgeblendet</span>
+                )}
               </div>
               {isAdmin && setNote && (
                 <div className="no-print" style={{ display: "flex", gap: 4, marginTop: 6 }}>
@@ -692,11 +736,13 @@ function Chip({ entry, conflict, isAdmin, removeBooking, onMove }) {
       removeBooking(entry.id);
     }
   };
+  const teamColor = t ? t.color : "#888888";
+  const tint = hexToRgba(teamColor, 0.12); // zarte Tönung in Mannschaftsfarbe
   return (
-    <div style={{ ...S.chip, borderLeft: `3px solid ${t ? t.color : C.textSec}`, ...(conflict ? { background: "#fbeaea", borderColor: "#e7a5a5" } : {}) }}
+    <div style={{ ...S.chip, background: tint, borderLeft: `4px solid ${teamColor}`, ...(conflict ? { background: "#fbeaea", borderColor: "#e7a5a5" } : {}) }}
       title={conflict ? "Doppelbelegung – gleiche Zone und Zeit" : undefined}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
-        <span style={{ fontWeight: 500, fontSize: 12 }}>
+        <span style={{ fontWeight: 600, fontSize: 12 }}>
           {conflict && <span style={{ color: C.danger }}>⚠️ </span>}
           {t ? t.name : entry.team}
         </span>
@@ -735,19 +781,26 @@ function Chip({ entry, conflict, isAdmin, removeBooking, onMove }) {
 }
 
 function Legend() {
+  const [showTeams, setShowTeams] = useState(false);
   return (
     <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-      <div style={S.legend}>
+      <div style={{ ...S.legend, alignItems: "center" }}>
         <span style={S.legItem}><span style={{ fontSize: 12 }}>V1–V4</span> Viertel (Platz 2)</span>
         <span style={S.legItem}><span style={{ fontSize: 12 }}>H1/H2</span> Hälften (Platz 3)</span>
         <span style={S.legItem}>⛔ Platzsperre</span>
         <span style={S.legItem}>⚠️ Doppelbelegung</span>
+        <button onClick={() => setShowTeams((s) => !s)} className="no-print"
+          style={{ border: `1px solid ${C.border}`, background: C.surface, color: C.textSec, cursor: "pointer", fontSize: 12, borderRadius: 999, padding: "3px 10px" }}>
+          {showTeams ? "Mannschaftsfarben ausblenden" : "Mannschaftsfarben anzeigen"}
+        </button>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 10 }}>
-        {TEAMS.map((t) => (
-          <span key={t.id} style={S.legItem}><i style={{ ...S.legDot, background: t.color }} />{t.name}</span>
-        ))}
-      </div>
+      {showTeams && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 10 }}>
+          {TEAMS.map((t) => (
+            <span key={t.id} style={S.legItem}><i style={{ ...S.legDot, background: t.color }} />{t.name}</span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

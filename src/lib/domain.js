@@ -4,7 +4,7 @@ export const TEAMS = [
   { id: "m1", name: "1. Mannschaft", color: "#1d4ed8" },
   { id: "m2", name: "2. Mannschaft", color: "#0ea5e9" },
   { id: "ah", name: "Alte Herren", color: "#525252" },
-  { id: "sr", name: "Schiedsrichter", color: "#facc15" },
+  { id: "sr", name: "Schiedsrichter", color: "#1a1a1a" },
   { id: "u19", name: "U19", color: "#15803d" },
   { id: "u17", name: "U17", color: "#65a30d" },
   { id: "u17_2", name: "U17/2", color: "#0d9488" },
@@ -122,11 +122,6 @@ export const expandRecurrence = (fromKey, toKey, weekday) => {
 };
 
 // ---------- (entfernt) Auto-Belegung 1./2. Mannschaft ----------
-// Früher wurde das Di/Do-Training der 1./2. Mannschaft fest erzeugt.
-// Auf Wunsch entfernt: Es wird jetzt ganz normal über
-// "Belegung eintragen -> Wiederkehrend" als Serie angelegt.
-// Die Funktion bleibt als leere Liste erhalten, damit die
-// Konfliktprüfung an allen Stellen unverändert weiterläuft.
 export const autoTrainingForDay = (date) => [];
 
 // ---------- Doppelbelegung erkennen ----------
@@ -140,11 +135,6 @@ const minToTime = (mins) => {
 };
 
 // Vor-/Nachlauf bei Heimspielen: 60 Min Aufwärmen davor, 15 Min Abbau danach.
-// Die gespeicherte Anstoß-/Endzeit bleibt unverändert – diese Funktion liefert
-// nur die EFFEKTIV belegte Zeitspanne für Konfliktprüfung und Anzeige.
-// Ist das Aufwärmen auf einen ANDEREN Platz ausgelagert (warmupField gesetzt und
-// != Spielplatz), entfällt der 60-Min-Vorlauf auf dem Spielplatz – dort gilt dann
-// nur Anstoß bis Ende + 15 Min Abbau. Das Aufwärmen wird als eigener Block geführt.
 export const MATCH_PRE_MIN = 60;
 export const MATCH_POST_MIN = 15;
 export const effectiveSpan = (e) => {
@@ -153,7 +143,6 @@ export const effectiveSpan = (e) => {
     const pre = warmupElsewhere ? 0 : MATCH_PRE_MIN;
     return { start: minToTime(toMin(e.start) - pre), end: minToTime(toMin(e.end) + MATCH_POST_MIN) };
   }
-  // Aufwärm-Block (eigener Eintrag): exakt die gespeicherte Zeit
   return { start: e.start, end: e.end };
 };
 
@@ -166,7 +155,6 @@ export const zonesOverlap = (a, b) => {
   if (a.field !== b.field) return false;
   if (a.zone === b.zone) return true;
   if (a.field === "p1") return true; // Platz 1 voll = überlappt alles
-  // Überlappung, wenn die belegten Teilflächen sich schneiden
   const ua = unitsOf(a.zone), ub = unitsOf(b.zone);
   return ua.some((u) => ub.includes(u));
 };
@@ -176,9 +164,6 @@ export const findConflicts = (candidate, existing) =>
     (e) => e.id !== candidate.id && zonesOverlap(candidate, e) && timeOverlap(candidate, e)
   );
 
-// Aufwärm-Block für ein Heimspiel mit ausgelagertem Aufwärmen.
-// Liefert null, wenn kein separater Block nötig ist (Aufwärmen auf dem Spielplatz).
-// Der Block belegt den ganzen Aufwärmplatz von Anstoß-60 bis Anstoß.
 const fullZoneOf = (fieldId) => {
   const f = fieldById(fieldId);
   return f ? f.zones[0].id : null;
@@ -193,7 +178,7 @@ export const warmupBlockFor = (match) => {
     team: match.team,
     start: minToTime(toMin(match.start) - MATCH_PRE_MIN),
     end: match.start,
-    kind: "warmup",          // eigener Typ: Aufwärmen
+    kind: "warmup",
     status: match.status || "frei",
   };
 };

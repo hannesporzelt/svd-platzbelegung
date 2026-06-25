@@ -179,7 +179,7 @@ export default function App() {
   const trainerInbox = (isTrainer && user?.uid)
     ? messages.filter((m) =>
         m.dir === "out" && !m.done &&
-        ((m.recipientUid && m.recipientUid === user.uid) || (m.team && myTeams.includes(m.team))))
+        (m.toAll || (m.recipientUid && m.recipientUid === user.uid) || (m.team && myTeams.includes(m.team))))
     : [];
   const trainerUnread = trainerInbox.length;
   const weekConflictCount = useMemo(() => {
@@ -983,7 +983,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       {tab === "statistik" && <StatsPanel bookings={bookings} />}
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDayApproval bookings={bookings} setBookingStatus={setBookingStatus} approveSeries={approveSeries} moveBooking={moveBooking} removeBooking={removeBooking} removeSeries={removeSeries} addMessage={addMessage} />}
-      {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} users={users} />}
+      {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} users={users} addMessage={addMessage} />}
       {tab === "nutzer" && <UserManager users={users} saveUser={saveUser} setUserRole={setUserRole} setUserTeams={setUserTeams} removeUser={removeUser} />}
     </div>
   );
@@ -1208,7 +1208,7 @@ function BookingManager({ bookings, removeBooking, removeSeries, onMove }) {
 }
 
 // Platzwart: Nachrichten von Trainern
-function MessageInbox({ messages, setMessageDone, removeMessage, users }) {
+function MessageInbox({ messages, setMessageDone, removeMessage, users, addMessage }) {
   // Inbox zeigt nur eingehende Nachrichten (Trainer -> Platzwart)
   const userById = {};
   (users || []).forEach((u) => { userById[u.id] = u; });
@@ -1223,8 +1223,50 @@ function MessageInbox({ messages, setMessageDone, removeMessage, users }) {
   const open = sorted.filter((m) => !m.done);
   const done = sorted.filter((m) => m.done);
   const fmtTs = (ts) => ts ? new Date(ts).toLocaleString("de-DE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+
+  // ----- Senden an Trainer (an alle / Mannschaft / Person) -----
+  const [target, setTarget] = useState("all");       // "all" | team:<id> | user:<uid>
+  const [text, setText] = useState("");
+  const [sent, setSent] = useState(false);
+  // Nur echte Trainer-Konten als Einzelempfänger anbieten
+  const trainerUsers = (users || []).filter((u) => u.role === "trainer");
+  const send = () => {
+    const t = text.trim();
+    if (!t) return;
+    const base = { dir: "out", text: t };
+    if (target === "all") base.toAll = true;
+    else if (target.startsWith("team:")) base.team = target.slice(5);
+    else if (target.startsWith("user:")) base.recipientUid = target.slice(5);
+    addMessage(base);
+    setText(""); setSent(true); setTimeout(() => setSent(false), 2000);
+  };
+
   return (
     <div>
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, marginBottom: 18, background: "#fafaf7" }}>
+        <div style={S.subHead}>Nachricht an Trainer senden</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+          <select value={target} onChange={(e) => setTarget(e.target.value)} style={{ ...S.select, width: "auto", minWidth: 200 }}>
+            <option value="all">An alle Trainer</option>
+            <optgroup label="An eine Mannschaft">
+              {TEAMS.map((t) => <option key={t.id} value={`team:${t.id}`}>{t.name}</option>)}
+            </optgroup>
+            {trainerUsers.length > 0 && (
+              <optgroup label="An eine Person">
+                {trainerUsers.map((u) => <option key={u.id} value={`user:${u.id}`}>{u.name || u.email}</option>)}
+              </optgroup>
+            )}
+          </select>
+        </div>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Nachricht an die Trainer…" rows={3}
+          style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", borderRadius: 8, border: `1px solid ${C.border}`, fontSize: 14, fontFamily: "inherit", resize: "vertical" }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+          <button style={{ ...S.primaryBtn, ...(text.trim() ? {} : S.btnDisabled) }} disabled={!text.trim()} onClick={send}>Senden</button>
+          {sent && <span style={{ color: C.ok, fontSize: 13 }}>✓ Nachricht gesendet</span>}
+        </div>
+      </div>
+
+      <div style={S.subHead}>Eingegangene Nachrichten</div>
       {open.length === 0 && <p style={{ color: C.textSec, fontSize: 14 }}>Keine neuen Nachrichten.</p>}
       {open.map((m) => (
         <div key={m.id} style={S.wishRow}>
@@ -1969,9 +2011,9 @@ function MessageForm({ trainerTeam, addMessage, messages, myUid, myTeams }) {
     addMessage({ team: trainerTeam, text: t, dir: "in" });
     setText(""); setSent(true); setTimeout(() => setSent(false), 2000);
   };
-  // Eingehend (vom Platzwart): an mich persönlich ODER an eines meiner Teams
+  // Eingehend (vom Platzwart): an alle, an mich persönlich ODER an eines meiner Teams
   const incoming = messages
-    .filter((m) => m.dir === "out" && ((m.recipientUid && m.recipientUid === myUid) || (m.team && teams.includes(m.team))))
+    .filter((m) => m.dir === "out" && (m.toAll || (m.recipientUid && m.recipientUid === myUid) || (m.team && teams.includes(m.team))))
     .slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 8);
   // Meine gesendeten: was ich selbst geschickt habe
   const mine = messages

@@ -26,9 +26,12 @@ export function useAuth() {
   );
   // Aktuelle Platzwart-PIN aus Firestore (config/security). Solange nichts
   // hinterlegt ist, gilt der Start-Wert (ADMIN_PASSWORD_FALLBACK).
+  // WICHTIG: Listener erst starten, wenn ein Nutzer angemeldet ist (auch
+  // anonym) – sonst lehnt Firestore den Read mit permission-denied ab.
   const [pin, setPin] = useState(ADMIN_PASSWORD_FALLBACK);
 
   useEffect(() => {
+    if (!user) return; // erst nach (anonymer) Anmeldung lauschen
     const unsub = onSnapshot(
       doc(db, "config", "security"),
       (snap) => {
@@ -38,7 +41,7 @@ export function useAuth() {
       () => setPin(ADMIN_PASSWORD_FALLBACK)
     );
     return unsub;
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {

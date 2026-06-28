@@ -1515,7 +1515,7 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit }) {
 
   // Wenn Firestore-Daten (nach)geladen werden, Entwurf aktualisieren – aber nur,
   // solange der Nutzer nicht gerade tippt (einfacher Ansatz: beim ersten Laden).
-  useEffect(() => {
+  React.useEffect(() => {
     setDraft({ p1: initial("p1"), p2: initial("p2") });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [irrigation?.p1?.updatedTs, irrigation?.p2?.updatedTs]);
@@ -1575,6 +1575,7 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit }) {
 
   return (
     <div>
+      <div style={{ fontSize: 11, color: C.textTer, marginBottom: 6 }}>Beregnung · v1.0</div>
       <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
         Beregnungszeiten für beide Plätze. Beide Plätze teilen sich <b>eine Pumpe</b> – es darf nie mehr
         als eine Station gleichzeitig laufen. {canEdit ? "Du kannst die Zeiten ändern." : "Nur ansehen – Änderungsrecht hat der Admin vergeben."}

@@ -284,3 +284,61 @@ export const kickoffToStart = (kickoff, totalDurationSec, endOffsetMin = 30) => 
 };
 
 export const irrTimeFmt = { secToTime, secToTimeS, toSec };
+
+// ====================================================================
+//  HEIMSPIEL-AUTOMATIK
+//  Findet kommende Heimspiele (kind=match) der ausgewählten Mannschaften,
+//  nimmt pro Tag+Platz den FRÜHESTEN Anpfiff und berechnet die
+//  Kurzberegnungs-Startzeiten (Programm B + C bzw. ein Durchgang).
+// ====================================================================
+
+// cfg pro Platz: { runMin, gapSec, torStations:[...], endOffsetMin }
+export const computeMatchIrrigation = (bookings, triggerTeams, cfgByField, todayKey) => {
+  const isTrigger = (t) => Array.isArray(triggerTeams) && triggerTeams.includes(t);
+  // nur Heimspiele ab heute, mit auslösender Mannschaft
+  const matches = (bookings || []).filter(
+    (b) => b.kind === "match" && b.team && isTrigger(b.team) && (!todayKey || b.date >= todayKey)
+  );
+  // pro Datum + Platz frühesten Anpfiff bestimmen
+  const earliest = {}; // key date|field -> booking
+  matches.forEach((b) => {
+    const key = `${b.date}|${b.field}`;
+    if (!earliest[key] || toSec(b.start) < toSec(earliest[key].start)) earliest[key] = b;
+  });
+
+  const result = [];
+  Object.values(earliest).forEach((b) => {
+    const cfg = (cfgByField && cfgByField[b.field]) || {};
+    const runMin = cfg.runMin || 5;
+    const gapSec = cfg.gapSec || 5;
+    const endOffset = cfg.endOffsetMin != null ? cfg.endOffsetMin : 30;
+    const tor = Array.isArray(cfg.torStations) ? cfg.torStations : [];
+    const stations = cfg.stations || 12;
+
+    if (tor.length > 0 && tor.length < stations) {
+      // Zwei-Programm-Lösung: Tor-Regner zuletzt (Prog. C), Rest davor (Prog. B)
+      const torDur = passDurationSec(tor.length, runMin, gapSec);
+      const restDur = passDurationSec(stations - tor.length, runMin, gapSec);
+      const c = kickoffToStart(b.start, torDur, endOffset);
+      const bb = kickoffToStart(c.start, restDur, 0);
+      result.push({
+        date: b.date, field: b.field, team: b.team, kickoff: b.start,
+        mode: "BC",
+        progB: bb.start, progC: c.start, end: c.end,
+        torStations: tor,
+      });
+    } else {
+      // Ein Durchgang über alle Stationen
+      const dur = passDurationSec(stations, runMin, gapSec);
+      const one = kickoffToStart(b.start, dur, endOffset);
+      result.push({
+        date: b.date, field: b.field, team: b.team, kickoff: b.start,
+        mode: "ONE",
+        start: one.start, end: one.end,
+      });
+    }
+  });
+  // nach Datum sortieren
+  result.sort((a, b) => (a.date + a.field).localeCompare(b.date + b.field));
+  return result;
+};

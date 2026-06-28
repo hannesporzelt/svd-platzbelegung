@@ -205,6 +205,9 @@ export default function App() {
   const { messages, messagesReady, addMessage, setMessageDone, removeMessage } = useMessages();
   const { users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser } = useUsers(isPlatzwart);
   const { irrigation, irrigationReady, saveIrrigation } = useIrrigation();
+  const maehplanCfg = (irrigation && irrigation._maehplan) || {};
+  const maehplanOn = maehplanCfg.enabled === true;
+  const maehplanUrl = maehplanCfg.url || "https://svd-maehplan.vercel.app";
 
   // Heimspiel-Kurzberegnung für HEUTE (für Spieltag-Banner im Plan)
   const todayMatchIrr = useMemo(() => {
@@ -341,9 +344,11 @@ export default function App() {
       )}
       <Header
         view={view}
-        setView={(v) => (v === "admin" ? requestAdmin() : v === "trainer" ? requestTrainer() : v === "vorstand" ? requestVorstand() : setView(v))}
+        setView={(v) => (v === "admin" ? requestAdmin() : v === "trainer" ? requestTrainer() : v === "vorstand" ? requestVorstand() : v === "maehplan" ? setView("maehplan") : setView(v))}
         isAdmin={isAdmin}
         isVorstand={isVorstand}
+        isPlatzwart={isPlatzwart}
+        maehplanOn={maehplanOn}
         isLoggedIn={isLoggedIn}
         role={role}
         myTeams={myTeams}
@@ -499,6 +504,10 @@ export default function App() {
         />
       )}
 
+      {view === "maehplan" && maehplanOn && isPlatzwart && (
+        <MaehplanView url={maehplanUrl} />
+      )}
+
       {view === "trainer" && (isTrainer || isPlatzwart) && (
         <TrainerPanel
           trainerTeam={trainerTeam}
@@ -535,19 +544,20 @@ export default function App() {
 }
 
 /* ---------------- Header ---------------- */
-function Header({ view, setView, isAdmin, isVorstand, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf, onWeekPdf, theme, setTheme }) {
+function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf, onWeekPdf, theme, setTheme, maehplanOn }) {
   const [menuOpen, setMenuOpen] = useState(false);
   // Welche Teams darf der Trainer im Dropdown wählen?
   const teamOptions = (role === "trainer" && myTeams.length > 0)
     ? TEAMS.filter((t) => myTeams.includes(t.id))
     : TEAMS;
   // Rollenanzeige rechts oben
-  const roleLabel = view === "vorstand" ? "Vorstand" : view === "admin" ? "Platzwart" : view === "trainer" ? "Trainer" : "Betrachter";
+  const roleLabel = view === "maehplan" ? "Mähplan" : view === "vorstand" ? "Vorstand" : view === "admin" ? "Platzwart" : view === "trainer" ? "Trainer" : "Betrachter";
 
-  // "Vorstand" erscheint nur für echte Admins.
+  // "Vorstand" nur für Admins; "Mähplan" für Platzwart-Ebene, wenn aktiviert.
   const ROLES = [
     ["viewer", "Betrachter"], ["trainer", "Trainer"], ["admin", "Platzwart"],
     ...(isVorstand ? [["vorstand", "Vorstand"]] : []),
+    ...(maehplanOn && isPlatzwart ? [["maehplan", "Mähplan"]] : []),
   ];
   const close = () => setMenuOpen(false);
 
@@ -2034,6 +2044,29 @@ function KickoffCalc() {
   );
 }
 
+/* ---------------- Mähplan (eingebettet) ---------------- */
+function MaehplanView({ url }) {
+  return (
+    <div style={{ ...S.card, marginTop: "1rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+        <h2 style={{ margin: 0, fontSize: 20, display: "flex", alignItems: "center", gap: 8 }}>🌱 Mähplan</h2>
+        <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...S.navBtn, textDecoration: "none" }}>
+          In neuem Tab öffnen ↗
+        </a>
+      </div>
+      <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>
+        Der Mähplan läuft als eigene App und wird hier eingebettet angezeigt. Falls die Ansicht leer bleibt,
+        nutze „In neuem Tab öffnen".
+      </p>
+      <iframe
+        src={url}
+        title="SVD Mähplan"
+        style={{ width: "100%", height: "75vh", border: `1px solid ${C.border}`, borderRadius: 10, background: "#fff" }}
+      />
+    </div>
+  );
+}
+
 /* ---------------- Vorstand-Bereich (nur Admin) ---------------- */
 function VorstandPanel({ users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, importBookings, bookings }) {
   return (
@@ -2061,6 +2094,52 @@ function VorstandPanel({ users, saveUser, setUserRole, setUserTeams, setUserRigh
         importBookings={importBookings}
         bookings={bookings}
       />
+      <MaehplanToggle irrigation={irrigation} saveIrrigation={saveIrrigation} />
+    </div>
+  );
+}
+
+function MaehplanToggle({ irrigation, saveIrrigation }) {
+  const cfg = (irrigation && irrigation._maehplan) || {};
+  const [enabled, setEnabled] = useState(cfg.enabled === true);
+  const [url, setUrl] = useState(cfg.url || "https://svd-maehplan.vercel.app");
+  const [msg, setMsg] = useState(null);
+
+  React.useEffect(() => {
+    const c = (irrigation && irrigation._maehplan) || {};
+    setEnabled(c.enabled === true);
+    setUrl(c.url || "https://svd-maehplan.vercel.app");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [irrigation?._maehplan?.updatedTs]);
+
+  const save = async () => {
+    try {
+      await saveIrrigation("_maehplan", { enabled, url: url.trim() });
+      setMsg("Gespeichert.");
+      setTimeout(() => setMsg(null), 2500);
+    } catch (e) {
+      setMsg("Speichern fehlgeschlagen: " + (e.message || ""));
+    }
+  };
+
+  return (
+    <div style={{ ...S.card, marginTop: 14, background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+      <h3 style={{ margin: "0 0 6px" }}>🌱 Mähplan-Bereich</h3>
+      <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>
+        Wenn aktiviert, erscheint der Menüpunkt „Mähplan" für Vorstand und Platzwarte. Solange deaktiviert,
+        sieht ihn niemand (du kannst ihn als Vorstand zum Testen aber kurz einschalten).
+      </p>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginBottom: 8 }}>
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+        Mähplan-Bereich aktiviert
+      </label>
+      <label style={{ fontSize: 12, color: C.textSec, display: "block", marginBottom: 8 }}>
+        Mähplan-Adresse (URL)
+        <input type="text" value={url} onChange={(e) => setUrl(e.target.value)}
+          style={{ ...S.select, width: "100%", maxWidth: 360, marginTop: 2 }} />
+      </label>
+      <button style={S.okBtn} onClick={save}>Speichern</button>
+      {msg && <span style={{ fontSize: 12, color: C.textSec, marginLeft: 8 }}>{msg}</span>}
     </div>
   );
 }

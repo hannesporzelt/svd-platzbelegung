@@ -290,6 +290,12 @@ export default function App() {
     setShowLogin(true);
   };
 
+  // Vorstand-Bereich öffnen: nur echte Admins; sonst Login-Maske.
+  const requestVorstand = () => {
+    if (isVorstand) { setView("vorstand"); return; }
+    setShowLogin(true);
+  };
+
   // Trainer-Bereich öffnen: eingeloggter Trainer/Platzwart direkt,
   // sonst Login-Maske.
   const requestTrainer = () => {
@@ -321,8 +327,9 @@ export default function App() {
       )}
       <Header
         view={view}
-        setView={(v) => (v === "admin" ? requestAdmin() : v === "trainer" ? requestTrainer() : setView(v))}
+        setView={(v) => (v === "admin" ? requestAdmin() : v === "trainer" ? requestTrainer() : v === "vorstand" ? requestVorstand() : setView(v))}
         isAdmin={isAdmin}
+        isVorstand={isVorstand}
         isLoggedIn={isLoggedIn}
         role={role}
         myTeams={myTeams}
@@ -441,6 +448,19 @@ export default function App() {
         />
       )}
 
+      {view === "vorstand" && isVorstand && (
+        <VorstandPanel
+          users={users}
+          saveUser={saveUser}
+          setUserRole={setUserRole}
+          setUserTeams={setUserTeams}
+          setUserRights={setUserRights}
+          removeUser={removeUser}
+          isVorstand={isVorstand}
+          changePin={changePin}
+        />
+      )}
+
       {view === "trainer" && (isTrainer || isPlatzwart) && (
         <TrainerPanel
           trainerTeam={trainerTeam}
@@ -477,16 +497,20 @@ export default function App() {
 }
 
 /* ---------------- Header ---------------- */
-function Header({ view, setView, isAdmin, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf, onWeekPdf, theme, setTheme }) {
+function Header({ view, setView, isAdmin, isVorstand, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf, onWeekPdf, theme, setTheme }) {
   const [menuOpen, setMenuOpen] = useState(false);
   // Welche Teams darf der Trainer im Dropdown wählen?
   const teamOptions = (role === "trainer" && myTeams.length > 0)
     ? TEAMS.filter((t) => myTeams.includes(t.id))
     : TEAMS;
   // Rollenanzeige rechts oben
-  const roleLabel = view === "admin" ? "Platzwart" : view === "trainer" ? "Trainer" : "Betrachter";
+  const roleLabel = view === "vorstand" ? "Vorstand" : view === "admin" ? "Platzwart" : view === "trainer" ? "Trainer" : "Betrachter";
 
-  const ROLES = [["viewer", "Betrachter"], ["trainer", "Trainer"], ["admin", "Platzwart"]];
+  // "Vorstand" erscheint nur für echte Admins.
+  const ROLES = [
+    ["viewer", "Betrachter"], ["trainer", "Trainer"], ["admin", "Platzwart"],
+    ...(isVorstand ? [["vorstand", "Vorstand"]] : []),
+  ];
   const close = () => setMenuOpen(false);
 
   return (
@@ -1080,9 +1104,6 @@ const ADMIN_MENU = [
   { group: "Kommunikation", items: [
     ["nachrichten", "Nachrichten"],
   ] },
-  { group: "Konten", items: [
-    ["nutzer", "Nutzer verwalten"],
-  ] },
 ];
 const ADMIN_LABELS = ADMIN_MENU.reduce((acc, g) => { g.items.forEach(([k, l]) => { acc[k] = l; }); return acc; }, {});
 
@@ -1150,7 +1171,6 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDayApproval bookings={bookings} setBookingStatus={setBookingStatus} approveSeries={approveSeries} moveBooking={moveBooking} removeBooking={removeBooking} removeSeries={removeSeries} addMessage={addMessage} />}
       {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} users={users} addMessage={addMessage} />}
-      {tab === "nutzer" && <UserManager users={users} saveUser={saveUser} setUserRole={setUserRole} setUserTeams={setUserTeams} setUserRights={setUserRights} removeUser={removeUser} isVorstand={isVorstand} changePin={changePin} />}
     </div>
   );
 }
@@ -1460,6 +1480,30 @@ function MessageInbox({ messages, setMessageDone, removeMessage, users, addMessa
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------------- Vorstand-Bereich (nur Admin) ---------------- */
+function VorstandPanel({ users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin }) {
+  return (
+    <div style={{ ...S.card, marginTop: "1rem" }}>
+      <h2 style={{ marginTop: 0, fontSize: 20, display: "flex", alignItems: "center", gap: 8 }}>
+        🏛 Vorstand
+      </h2>
+      <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
+        Bereich nur für den Vorstand/Admin: Rollen und Rechte vergeben, Nutzer verwalten und die Notfall-PIN ändern.
+      </p>
+      <UserManager
+        users={users}
+        saveUser={saveUser}
+        setUserRole={setUserRole}
+        setUserTeams={setUserTeams}
+        setUserRights={setUserRights}
+        removeUser={removeUser}
+        isVorstand={isVorstand}
+        changePin={changePin}
+      />
     </div>
   );
 }

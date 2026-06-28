@@ -4,7 +4,7 @@ import {
   dayKey, mondayOf, addDays, isoWeek, fmtRange, expandRecurrence, zoneCovers,
   autoTrainingForDay, findConflicts, conflictIdsForEntries, effectiveSpan, warmupBlockFor,
   zonesOverlap, timeOverlap,
-  buildIrrigationWindows, findIrrigationOverlaps, passDurationSec, kickoffToStart,
+  buildIrrigationWindows, findIrrigationOverlaps, passDurationSec, kickoffToStart, computeMatchIrrigation,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
 import { useBookings, useLocks, useMessages, useUsers, useNotes, useIrrigation } from "./lib/data";
@@ -206,6 +206,18 @@ export default function App() {
   const { users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser } = useUsers(isPlatzwart);
   const { irrigation, irrigationReady, saveIrrigation } = useIrrigation();
 
+  // Heimspiel-Kurzberegnung für HEUTE (für Spieltag-Banner im Plan)
+  const todayMatchIrr = useMemo(() => {
+    const a = (irrigation && irrigation._auto) || {};
+    if (!a.triggerTeams || a.triggerTeams.length === 0) return [];
+    const today = dayKey(new Date());
+    const cfg = {
+      p1: { runMin: a.shortRunMin || 5, gapSec: a.shortGapSec || 5, torStations: a.torP1 || [3, 12, 7, 8], stations: 12, endOffsetMin: a.endOffsetMin != null ? a.endOffsetMin : 30 },
+      p2: { runMin: a.shortRunMin || 5, gapSec: a.shortGapSec || 5, torStations: a.torP2 || [], stations: 12, endOffsetMin: a.endOffsetMin != null ? a.endOffsetMin : 30 },
+    };
+    return computeMatchIrrigation(bookings, a.triggerTeams, cfg, today).filter((m) => m.date === today);
+  }, [irrigation, bookings]);
+
   const [view, setView] = useState("viewer"); // viewer | trainer | admin
   const [msgsSeen, setMsgsSeen] = useState(false); // Login-Hinweis nur bis zum Ansehen zeigen
   const [trainerTeam, setTrainerTeam] = useState("u15");
@@ -350,6 +362,23 @@ export default function App() {
         theme={theme}
         setTheme={setTheme}
       />
+
+      {isPlatzwart && todayMatchIrr.length > 0 && (
+        <div style={{ ...S.warnBanner, background: "#eff6ff", color: "#1e40af", border: "1px solid #bfdbfe", display: "block" }}>
+          💧 <b>Heute Kurzberegnung vor Heimspiel:</b>{" "}
+          {todayMatchIrr.map((m, i) => {
+            const platz = m.field === "p1" ? "Platz 1" : "Platz 2";
+            return (
+              <span key={i}>
+                {i > 0 && " · "}
+                {platz} (Anpfiff {m.kickoff}): {m.mode === "BC"
+                  ? `Prog. B ${m.progB}, Prog. C ${m.progC}`
+                  : `Start ${m.start}`}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       {pendingCount > 0 && (
         <div style={{ ...S.warnBanner, background: "var(--c-info-bg, #eef4ff)", color: "#234", border: "1px solid #b9cdf0" }}>
@@ -1504,7 +1533,7 @@ const IRR_DEFAary = {
   p2: { days: ["Mi", "Fr"], runMin: 15, gapSec: 5, stations: 12, starts: ["00:45", "03:55"] },
 };
 
-function IrrigationPanel({ irrigation, saveIrrigation, canEdit }) {
+function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
   // lokale Entwürfe je Platz (erst speichern schreibt nach Firestore)
   const initial = (fid) => {
     const fromDb = irrigation && irrigation[fid];
@@ -1512,6 +1541,56 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit }) {
   };
   const [draft, setDraft] = useState({ p1: initial("p1"), p2: initial("p2") });
   const [savedMsg, setSavedMsg] = useState(null);
+
+  // Auto-Konfiguration (auslösende Mannschaften, Frist, Tor-Regner je Platz)
+  const autoFromDb = (irrigation && irrigation._auto) || {};
+  const [auto, setAuto] = useState({
+    triggerTeams: autoFromDb.triggerTeams || [],
+    endOffsetMin: autoFromDb.endOffsetMin != null ? autoFromDb.endOffsetMin : 30,
+    torP1: autoFromDb.torP1 || [3, 12, 7, 8],
+    torP2: autoFromDb.torP2 || [],
+    shortRunMin: autoFromDb.shortRunMin || 5,
+    shortGapSec: autoFromDb.shortGapSec || 5,
+  });
+  React.useEffect(() => {
+    const a = (irrigation && irrigation._auto) || {};
+    setAuto({
+      triggerTeams: a.triggerTeams || [],
+      endOffsetMin: a.endOffsetMin != null ? a.endOffsetMin : 30,
+      torP1: a.torP1 || [3, 12, 7, 8],
+      torP2: a.torP2 || [],
+      shortRunMin: a.shortRunMin || 5,
+      shortGapSec: a.shortGapSec || 5,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [irrigation?._auto?.updatedTs]);
+
+  const toggleTrigger = (tid) => setAuto((a) => ({
+    ...a,
+    triggerTeams: a.triggerTeams.includes(tid)
+      ? a.triggerTeams.filter((x) => x !== tid)
+      : [...a.triggerTeams, tid],
+  }));
+  const saveAuto = async () => {
+    try {
+      await saveIrrigation("_auto", auto);
+      setSavedMsg("Heimspiel-Einstellungen gespeichert.");
+      setTimeout(() => setSavedMsg(null), 2500);
+    } catch (e) {
+      setSavedMsg("Speichern fehlgeschlagen: " + (e.message || ""));
+    }
+  };
+
+  // Kommende Heimspiele mit Kurzberegnung berechnen
+  const today = dayKey(new Date());
+  const matchPlan = computeMatchIrrigation(
+    bookings, auto.triggerTeams,
+    {
+      p1: { runMin: auto.shortRunMin, gapSec: auto.shortGapSec, torStations: auto.torP1, stations: 12, endOffsetMin: auto.endOffsetMin },
+      p2: { runMin: auto.shortRunMin, gapSec: auto.shortGapSec, torStations: auto.torP2, stations: 12, endOffsetMin: auto.endOffsetMin },
+    },
+    today
+  );
 
   // Wenn Firestore-Daten (nach)geladen werden, Entwurf aktualisieren – aber nur,
   // solange der Nutzer nicht gerade tippt (einfacher Ansatz: beim ersten Laden).
@@ -1673,6 +1752,86 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit }) {
           </div>
         );
       })}
+
+      {/* Heimspiel-Automatik */}
+      <div style={{ ...S.card, marginTop: 14, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+        <h3 style={{ margin: "0 0 6px" }}>⚽ Heimspiel-Automatik</h3>
+        <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>
+          Für angehakte Mannschaften wird vor Heimspielen automatisch die Kurzberegnung berechnet
+          (pro Tag und Platz zählt der früheste Anpfiff). Beregnung endet {auto.endOffsetMin} Min vor Anpfiff.
+        </p>
+
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 12, color: C.textSec, marginBottom: 4 }}>Diese Mannschaften lösen Kurzberegnung aus:</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {TEAMS.map((t) => {
+              const on = auto.triggerTeams.includes(t.id);
+              return (
+                <button key={t.id} disabled={!canEdit} onClick={() => toggleTrigger(t.id)}
+                  style={{ ...S.roleBtn, ...(on ? S.roleBtnActive : {}), fontSize: 12, opacity: canEdit ? 1 : 0.6 }}>
+                  {on ? "✓ " : "○ "}{t.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 10 }}>
+          <label style={{ fontSize: 12, color: C.textSec }}>Ende vor Anpfiff (Min)
+            <input type="number" min="0" max="120" disabled={!canEdit} value={auto.endOffsetMin}
+              onChange={(e) => setAuto((a) => ({ ...a, endOffsetMin: Number(e.target.value) }))}
+              style={{ ...S.select, maxWidth: 90, marginTop: 2 }} />
+          </label>
+          <label style={{ fontSize: 12, color: C.textSec }}>Laufzeit/Station (Min)
+            <input type="number" min="1" max="30" disabled={!canEdit} value={auto.shortRunMin}
+              onChange={(e) => setAuto((a) => ({ ...a, shortRunMin: Number(e.target.value) }))}
+              style={{ ...S.select, maxWidth: 90, marginTop: 2 }} />
+          </label>
+          <label style={{ fontSize: 12, color: C.textSec }}>Tor-Regner Platz 1 (Nr., Komma)
+            <input type="text" disabled={!canEdit} value={auto.torP1.join(", ")}
+              onChange={(e) => setAuto((a) => ({ ...a, torP1: e.target.value.split(",").map((x) => parseInt(x.trim(), 10)).filter((n) => !isNaN(n)) }))}
+              style={{ ...S.select, maxWidth: 160, marginTop: 2 }} />
+          </label>
+          <label style={{ fontSize: 12, color: C.textSec }}>Tor-Regner Platz 2 (Nr., Komma)
+            <input type="text" disabled={!canEdit} value={auto.torP2.join(", ")}
+              onChange={(e) => setAuto((a) => ({ ...a, torP2: e.target.value.split(",").map((x) => parseInt(x.trim(), 10)).filter((n) => !isNaN(n)) }))}
+              style={{ ...S.select, maxWidth: 160, marginTop: 2 }} />
+          </label>
+        </div>
+
+        {canEdit && <button style={S.okBtn} onClick={saveAuto}>Heimspiel-Einstellungen speichern</button>}
+
+        {/* Liste kommender Heimspiele */}
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Kommende Heimspiele mit Kurzberegnung</div>
+          {matchPlan.length === 0 && (
+            <div style={{ fontSize: 13, color: C.textSec }}>Keine anstehenden Heimspiele der ausgewählten Mannschaften.</div>
+          )}
+          {matchPlan.map((m, i) => {
+            const d = new Date(m.date + "T12:00");
+            const datum = d.toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" });
+            const platz = m.field === "p1" ? "Platz 1" : m.field === "p2" ? "Platz 2" : m.field;
+            const team = teamById(m.team)?.name || m.team;
+            return (
+              <div key={i} style={{ ...S.wishRow, flexDirection: "column", alignItems: "stretch", gap: 2 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+                  <b>{datum} · {platz}</b>
+                  <span style={{ fontSize: 13, color: C.textSec }}>{team} · Anpfiff {m.kickoff}</span>
+                </div>
+                {m.mode === "BC" ? (
+                  <div style={{ fontSize: 13 }}>
+                    Programm B starten <b>{m.progB}</b> · Programm C (Tor {m.torStations.join(", ")}) starten <b>{m.progC}</b> · Ende {m.end}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 13 }}>
+                    Beregnung starten <b>{m.start}</b> · Ende {m.end}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Kurzprogramm-Rechner Heimspiel */}
       <KickoffCalc />

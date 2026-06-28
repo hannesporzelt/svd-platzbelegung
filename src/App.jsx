@@ -426,6 +426,7 @@ export default function App() {
             teamFilter={teamFilter}
             setTeamFilter={setTeamFilter}
             myTeams={myTeams}
+            irrigation={irrigation}
           />
 
           <div style={{ height: 16 }} />
@@ -798,7 +799,12 @@ function WeekNav({ weekStart, setWeekStart }) {
 }
 
 /* ---------------- Wochenraster ---------------- */
-function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove, notes, setNote, teamFilter, setTeamFilter, myTeams }) {
+function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove, notes, setNote, teamFilter, setTeamFilter, myTeams, irrigation }) {
+  // Beregnungstage je Platz (für Tropfen-Markierung im Plan)
+  const irrDays = {
+    p1: (irrigation && irrigation.p1 && irrigation.p1.days) || [],
+    p2: (irrigation && irrigation.p2 && irrigation.p2.days) || [],
+  };
   // Filter-Funktion: entscheidet, ob ein Eintrag angezeigt wird
   const matchesFilter = (e) => {
     if (!teamFilter || teamFilter === "all") return true;
@@ -850,6 +856,18 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
                 <span style={{ fontWeight: 500 }}>{WEEKDAYS[(d.getDay() + 6) % 7]}</span>
                 <span style={{ color: C.textSec, fontSize: 12 }}>{d.getDate()}.{d.getMonth() + 1}.</span>
               </div>
+              {(() => {
+                const wd = WEEKDAYS[(d.getDay() + 6) % 7];
+                const p1on = irrDays.p1.includes(wd);
+                const p2on = irrDays.p2.includes(wd);
+                if (!p1on && !p2on) return null;
+                return (
+                  <div style={{ display: "flex", gap: 4, marginBottom: 4 }} title="Beregnung an diesem Tag">
+                    {p1on && <span style={{ fontSize: 11, color: "#0f6e3e", background: "#e3f1ea", borderRadius: 5, padding: "1px 5px", fontWeight: 500 }}>💧 P1</span>}
+                    {p2on && <span style={{ fontSize: 11, color: "#1d6fb8", background: "#e4eef8", borderRadius: 5, padding: "1px 5px", fontWeight: 500 }}>💧 P2</span>}
+                  </div>
+                );
+              })()}
               {feiertagAn(d) && <div style={{ fontSize: 10, color: "#7a3f00", background: "#ffe8cc", borderRadius: 5, padding: "2px 5px", marginBottom: 4, fontWeight: 500 }} title="Gesetzlicher Feiertag">🎌 {feiertagAn(d)}</div>}
               {!feiertagAn(d) && ferienAn(d) && <div style={{ fontSize: 10, color: "#1d6b4f", background: "#e1f3ea", borderRadius: 5, padding: "2px 5px", marginBottom: 4 }} title="Schulferien Bayern">🏖️ {ferienAn(d)}</div>}
               {lock && <div style={S.lockChip} title={lock.reason}>⛔ Gesperrt{lock.reason ? `: ${lock.reason}` : ""}</div>}
@@ -1695,7 +1713,9 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
         return (
           <div key={f.id} style={{ ...S.card, marginBottom: 14 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6 }}>
-              <h3 style={{ margin: "0 0 6px" }}>{f.name} <span style={{ fontSize: 12, color: C.textSec, fontWeight: 400 }}>· {f.geraet}</span></h3>
+              <h3 style={{ margin: "0 0 6px", display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 12, height: 12, borderRadius: 3, background: f.id === "p1" ? "#0f6e3e" : "#1d6fb8", display: "inline-block" }} />
+                {f.name} <span style={{ fontSize: 12, color: C.textSec, fontWeight: 400 }}>· {f.geraet}</span></h3>
               <span style={{ fontSize: 12, color: C.textSec }}>Ende letzte Station: <b>{lastEnd}</b></span>
             </div>
 
@@ -1705,9 +1725,13 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {IRR_WEEKDAYS.map((wd) => {
                   const on = (d.days || []).includes(wd);
+                  const fieldColor = f.id === "p1" ? "#0f6e3e" : "#1d6fb8"; // Platz 1 grün, Platz 2 blau
+                  const activeStyle = on
+                    ? { background: fieldColor, color: "#fff", borderColor: fieldColor, fontWeight: 600 }
+                    : {};
                   return (
                     <button key={wd} disabled={!canEdit} onClick={() => toggleDay(f.id, wd)}
-                      style={{ ...S.roleBtn, ...(on ? S.roleBtnActive : {}), fontSize: 12, opacity: canEdit ? 1 : 0.6 }}>
+                      style={{ ...S.roleBtn, border: `1px solid ${C.border}`, ...activeStyle, fontSize: 12, opacity: canEdit ? 1 : 0.85 }}>
                       {wd}
                     </button>
                   );

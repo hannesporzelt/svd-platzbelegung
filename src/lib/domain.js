@@ -194,3 +194,93 @@ export const conflictIdsForEntries = (entries) => {
       }
   return ids;
 };
+
+// ====================================================================
+//  BEREGNUNG – Zeitberechnung & Pumpen-Überschneidungsprüfung
+//  Wichtig: GEMEINSAME PUMPE -> es darf zu keinem Zeitpunkt mehr als
+//  eine Station laufen, auch plattformübergreifend.
+// ====================================================================
+
+// Sekundengenaue Hilfen (Beregnung rechnet teils in Sekunden wegen 5-Sek-Pausen)
+const toSec = (t) => {
+  const [h, m] = (t || "0:0").split(":").map(Number);
+  return (h * 60 + m) * 60;
+};
+const secToTime = (s) => {
+  const x = Math.max(0, Math.round(s));
+  const hh = String(Math.floor(x / 3600) % 24).padStart(2, "0");
+  const mm = String(Math.floor((x % 3600) / 60)).padStart(2, "0");
+  return `${hh}:${mm}`;
+};
+const secToTimeS = (s) => {
+  const x = Math.max(0, Math.round(s));
+  const hh = String(Math.floor(x / 3600) % 24).padStart(2, "0");
+  const mm = String(Math.floor((x % 3600) / 60)).padStart(2, "0");
+  const ss = String(x % 60).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+};
+
+// Erzeugt die Zeitfenster aller Stationen eines Durchgangs ab Startzeit.
+// stationOrder: Array von Stationsnummern in Ablaufreihenfolge.
+// runMin: Laufzeit je Station, gapSec: Pause zwischen Stationen.
+export const buildPassWindows = (startTime, stationOrder, runMin, gapSec) => {
+  const out = [];
+  let t = toSec(startTime);
+  stationOrder.forEach((st, i) => {
+    const start = t;
+    const end = start + runMin * 60;
+    out.push({ station: st, startSec: start, endSec: end,
+               start: secToTime(start), end: secToTime(end) });
+    t = end + (i < stationOrder.length - 1 ? gapSec : 0);
+  });
+  return out;
+};
+
+// Kompletter Plan eines Platzes (alle Durchgänge) -> flache Fensterliste.
+// plan: { starts:["00:45","03:55"], stationOrder:[1..12], runMin, gapSec, fieldId }
+export const buildIrrigationWindows = (plan) => {
+  if (!plan || !Array.isArray(plan.starts)) return [];
+  const order = plan.stationOrder && plan.stationOrder.length
+    ? plan.stationOrder
+    : Array.from({ length: plan.stations || 12 }, (_, i) => i + 1);
+  const all = [];
+  plan.starts.forEach((s, pass) => {
+    if (!s) return;
+    buildPassWindows(s, order, plan.runMin || 15, plan.gapSec || 0)
+      .forEach((w) => all.push({ ...w, pass: pass + 1, field: plan.fieldId }));
+  });
+  return all;
+};
+
+const windowsOverlap = (a, b) => a.startSec < b.endSec && b.startSec < a.endSec;
+
+// Prüft eine Liste von Fenstern (z. B. aus mehreren Plätzen zusammengeführt)
+// auf Überschneidungen. Gibt Paare zurück, die sich zeitlich überlappen.
+export const findIrrigationOverlaps = (windows) => {
+  const conflicts = [];
+  const sorted = windows.slice().sort((a, b) => a.startSec - b.startSec);
+  for (let i = 0; i < sorted.length; i++) {
+    for (let j = i + 1; j < sorted.length; j++) {
+      if (sorted[j].startSec >= sorted[i].endSec) break; // nichts Späteres kann mehr überlappen
+      if (windowsOverlap(sorted[i], sorted[j])) {
+        conflicts.push([sorted[i], sorted[j]]);
+      }
+    }
+  }
+  return conflicts;
+};
+
+// Gesamtdauer eines Durchgangs in Sekunden (für Rückwärtsrechnung).
+export const passDurationSec = (stationCount, runMin, gapSec) =>
+  stationCount * runMin * 60 + Math.max(0, stationCount - 1) * gapSec;
+
+// Kurzprogramm Heimspiel: aus Anpfiff die Startzeit zurückrechnen, sodass
+// die Beregnung "endOffsetMin" vor Anpfiff endet.
+export const kickoffToStart = (kickoff, totalDurationSec, endOffsetMin = 30) => {
+  const endSec = toSec(kickoff) - endOffsetMin * 60;
+  const startSec = endSec - totalDurationSec;
+  return { start: secToTime(startSec), end: secToTime(endSec),
+           startExact: secToTimeS(startSec), endExact: secToTimeS(endSec) };
+};
+
+export const irrTimeFmt = { secToTime, secToTimeS, toSec };

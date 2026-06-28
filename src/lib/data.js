@@ -143,7 +143,26 @@ export function useUsers(enabled = true) {
     saveUser: (uid, data) => setDoc(doc(db, "users", uid), data, { merge: true }),
     setUserRole: (uid, role) => updateDoc(doc(db, "users", uid), { role }),
     setUserTeams: (uid, teams) => updateDoc(doc(db, "users", uid), { teams }),
+    // Rechte-Objekt eines Platzwarts setzen (nur Admin nutzt das in der UI).
+    // rights z. B. { irrigation:true, locks:false, messages:true, notes:true }
+    setUserRights: (uid, rights) => updateDoc(doc(db, "users", uid), { rights }),
     removeUser: (uid) => deleteDoc(doc(db, "users", uid)),
+  };
+}
+
+// Beregnungsplan: ein Dokument pro Platz unter irrigation/{fieldId}.
+// Inhalt z. B. { days:["Mo","Do"], runMin:15, gapSec:5, passes:2,
+//   start1:"00:45", start2:"03:55", stations:12, updatedTs }.
+export function useIrrigation() {
+  const { items, ready } = useCollection("irrigation");
+  const map = {};
+  items.forEach((it) => { map[it.id] = it; });
+  return {
+    irrigation: map,
+    irrigationReady: ready,
+    saveIrrigation: (fieldId, data) =>
+      setDoc(doc(db, "irrigation", fieldId), { ...data, updatedTs: Date.now() }, { merge: true }),
+    removeIrrigation: (fieldId) => deleteDoc(doc(db, "irrigation", fieldId)),
   };
 }
 

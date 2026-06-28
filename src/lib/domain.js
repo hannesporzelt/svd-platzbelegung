@@ -286,6 +286,88 @@ export const kickoffToStart = (kickoff, totalDurationSec, endOffsetMin = 30) => 
 export const irrTimeFmt = { secToTime, secToTimeS, toSec };
 
 // ====================================================================
+//  iCAL-IMPORT (BFV-Spielplan)
+//  Parst ICS-Text, erkennt Heimspiele (Ort enthält "Dörfleins"),
+//  liest Platz aus dem Ort und rechnet UTC -> lokale Zeit um.
+// ====================================================================
+
+// ICS entfaltet "gefaltete" Zeilen (Fortsetzung beginnt mit Leerzeichen).
+const unfoldIcs = (text) => (text || "").replace(/\r?\n[ \t]/g, "");
+
+// ICS-Wert entschärfen (\, \; \n)
+const icsUnescape = (s) => (s || "")
+  .replace(/\\n/gi, " ").replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\\\/g, "\\");
+
+// "20260705T163000Z" -> {date:"2026-07-05", time:"18:30"} (UTC -> Europe/Berlin)
+const parseIcsDate = (raw) => {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/.exec((raw || "").trim());
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s, z] = m;
+  if (z) {
+    // UTC -> Europe/Berlin (berücksichtigt automatisch Sommer-/Winterzeit)
+    const dt = new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi, +s));
+    const fmt = new Intl.DateTimeFormat("de-DE", {
+      timeZone: "Europe/Berlin", year: "numeric", month: "2-digit",
+      day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+    const parts = fmt.formatToParts(dt).reduce((a, p) => (a[p.type] = p.value, a), {});
+    return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
+  }
+  return { date: `${y}-${mo}-${d}`, time: `${h}:${mi}` };
+};
+
+// Platz aus dem Ort lesen: "...Platz 2,..." -> "p2"
+const fieldFromLocation = (loc) => {
+  const m = /Platz\s*(\d+)/i.exec(loc || "");
+  if (!m) return null;
+  return "p" + m[1];
+};
+
+// Heim-/Gastmannschaft aus dem Titel "Heim-Gast, Wettbewerb, ..."
+const teamsFromSummary = (sum) => {
+  const firstPart = (sum || "").split(",")[0]; // "SV Dörfleins-SC Kemmern"
+  const dash = firstPart.indexOf("-");
+  if (dash < 0) return { home: firstPart.trim(), guest: "" };
+  return { home: firstPart.slice(0, dash).trim(), guest: firstPart.slice(dash + 1).trim() };
+};
+
+// Parst kompletten ICS-Text -> Array aller Spiele
+export const parseIcsGames = (icsText) => {
+  const text = unfoldIcs(icsText);
+  const blocks = text.split("BEGIN:VEVENT").slice(1);
+  const games = [];
+  blocks.forEach((b) => {
+    const body = b.split("END:VEVENT")[0];
+    const get = (key) => {
+      const re = new RegExp("^" + key + "(?:;[^:]*)?:(.*)$", "mi");
+      const m = re.exec(body);
+      return m ? icsUnescape(m[1].trim()) : "";
+    };
+    const start = parseIcsDate(get("DTSTART"));
+    if (!start) return;
+    const summary = get("SUMMARY");
+    const location = get("LOCATION");
+    const { home, guest } = teamsFromSummary(summary);
+    games.push({
+      date: start.date, time: start.time,
+      summary, location, home, guest,
+      field: fieldFromLocation(location),
+      uid: get("UID"),
+    });
+  });
+  return games;
+};
+
+// Filtert nur Heimspiele (Ort enthält "Dörfleins") ab heute.
+export const homeGamesFromIcs = (icsText, todayKey, homeNeedle = "Dörfleins") => {
+  const needle = homeNeedle.toLowerCase();
+  return parseIcsGames(icsText)
+    .filter((g) => (g.location || "").toLowerCase().includes(needle))
+    .filter((g) => !todayKey || g.date >= todayKey)
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+};
+
+// ====================================================================
 //  HEIMSPIEL-AUTOMATIK
 //  Findet kommende Heimspiele (kind=match) der ausgewählten Mannschaften,
 //  nimmt pro Tag+Platz den FRÜHESTEN Anpfiff und berechnet die

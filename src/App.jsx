@@ -495,6 +495,7 @@ export default function App() {
           irrigation={irrigation}
           saveIrrigation={saveIrrigation}
           importBookings={importBookings}
+          bookings={bookings}
         />
       )}
 
@@ -1842,7 +1843,7 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
   );
 }
 
-function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings }) {
+function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, bookings }) {
   const saved = (irrigation && irrigation._calendars) || {};
   const [cals, setCals] = useState(Array.isArray(saved.list) ? saved.list : []);
   const [newUrl, setNewUrl] = useState("");
@@ -1900,11 +1901,11 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings })
     if (!importBookings || games.length === 0) return;
     setImporting(true); setMsg(null);
     try {
-      const bookings = [];
+      const newBookings = [];
       games.forEach((g) => {
-        icsGamesToBookings([g], g.team).forEach((b) => bookings.push(b));
+        icsGamesToBookings([g], g.team).forEach((b) => newBookings.push(b));
       });
-      const n = await importBookings(bookings);
+      const n = await importBookings(newBookings, bookings);
       setMsg(`${n} Heimspiel(e) in den Plan eingetragen/aktualisiert.`);
     } catch (e) {
       setMsg("Eintragen fehlgeschlagen: " + (e.message || ""));
@@ -2035,7 +2036,7 @@ function KickoffCalc() {
 }
 
 /* ---------------- Vorstand-Bereich (nur Admin) ---------------- */
-function VorstandPanel({ users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, importBookings }) {
+function VorstandPanel({ users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, importBookings, bookings }) {
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
       <h2 style={{ marginTop: 0, fontSize: 20, display: "flex", alignItems: "center", gap: 8 }}>
@@ -2059,6 +2060,7 @@ function VorstandPanel({ users, saveUser, setUserRole, setUserTeams, setUserRigh
         saveIrrigation={saveIrrigation}
         canEdit={isVorstand}
         importBookings={importBookings}
+        bookings={bookings}
       />
     </div>
   );

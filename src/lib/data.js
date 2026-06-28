@@ -40,14 +40,23 @@ export function useBookings() {
     },
     // Importiert BFV-Spiele: Doc-ID = bfv-<UID>, daher überschreibt ein erneuter
     // Import dasselbe Spiel (Update bei Verschiebung), statt Dubletten zu erzeugen.
-    importBookings: async (games) => {
+    // existing = aktuelle bookings; bei platzManuell bleibt der gesetzte Platz/Zone erhalten.
+    importBookings: async (games, existing) => {
       const batch = writeBatch(db);
       const owner = uid();
+      const byId = {};
+      (existing || []).forEach((b) => { if (b.id) byId[b.id] = b; });
       let count = 0;
       games.forEach((g) => {
         if (!g.bfvUid) return;
         const id = "bfv-" + String(g.bfvUid).replace(/[^A-Za-z0-9_:-]/g, "");
-        batch.set(doc(db, "bookings", id), { ...g, ownerUid: owner, source: "bfv" });
+        const prev = byId[id];
+        let entry = { ...g, ownerUid: owner, source: "bfv" };
+        // Platz-Schutz: wurde der Platz manuell gesetzt, BFV-Platz/Zone NICHT überschreiben
+        if (prev && prev.platzManuell) {
+          entry = { ...entry, field: prev.field, zone: prev.zone, platzManuell: true };
+        }
+        batch.set(doc(db, "bookings", id), entry);
         count++;
       });
       await batch.commit();
@@ -67,6 +76,14 @@ export function useBookings() {
     },
     moveBooking: async (oldId, newData) => {
       const { id, ...clean } = newData;
+      // BFV-importierte Spiele behalten ihre feste Doc-ID (bfv-<UID>), damit der
+      // Import sie weiter erkennt. Verschiebung markiert den Platz als manuell.
+      if (typeof oldId === "string" && oldId.startsWith("bfv-")) {
+        await setDoc(doc(db, "bookings", oldId), {
+          ...clean, ownerUid: clean.ownerUid || uid(), source: "bfv", platzManuell: true,
+        });
+        return;
+      }
       await setDoc(doc(db, "bookings", uniqueId()), { ...clean, ownerUid: clean.ownerUid || uid() });
       await deleteDoc(doc(db, "bookings", oldId));
     },

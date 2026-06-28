@@ -30,7 +30,7 @@ function loadJsPDF() {
 }
 
 // Monatsplan als PDF erzeugen (DIN A4 quer), als Kalenderraster gezeichnet.
-async function exportMonthPDF(monthAnchor, entriesForDay) {
+async function exportMonthPDF(monthAnchor, entriesForDay, irrDays) {
   let jsPDF;
   try {
     jsPDF = await loadJsPDF();
@@ -82,6 +82,14 @@ async function exportMonthPDF(monthAnchor, entriesForDay) {
     pdf.setFont("helvetica", "bold"); pdf.setFontSize(9);
     pdf.setTextColor(inMonth ? 28 : 150, inMonth ? 28 : 150, inMonth ? 26 : 150);
     pdf.text(String(d.getDate()), x + 1.5, y + 4);
+    // Beregnungs-Markierung P1/P2 rechts neben der Datumszahl
+    if (irrDays) {
+      const wd = WEEKDAYS[(d.getDay() + 6) % 7];
+      let mx = x + colW - 1.5;
+      pdf.setFont("helvetica", "bold"); pdf.setFontSize(6);
+      if (irrDays.p2 && irrDays.p2.includes(wd)) { pdf.setTextColor(29, 111, 184); pdf.text("P2", mx, y + 4, { align: "right" }); mx -= 5; }
+      if (irrDays.p1 && irrDays.p1.includes(wd)) { pdf.setTextColor(15, 110, 62); pdf.text("P1", mx, y + 4, { align: "right" }); }
+    }
     // Einträge
     const entries = entriesForDay(d).slice().sort((a, b) => a.start.localeCompare(b.start));
     pdf.setFont("helvetica", "normal"); pdf.setFontSize(6.5);
@@ -106,7 +114,7 @@ async function exportMonthPDF(monthAnchor, entriesForDay) {
 }
 
 // Wochenplan als PDF (DIN A4 quer): 7 Tagesspalten mit den Einträgen.
-async function exportWeekPDF(weekDays, entriesForDay) {
+async function exportWeekPDF(weekDays, entriesForDay, irrDays) {
   let jsPDF;
   try {
     jsPDF = await loadJsPDF();
@@ -142,6 +150,14 @@ async function exportWeekPDF(weekDays, entriesForDay) {
     pdf.setDrawColor(200); pdf.rect(x, headTop, colW, headH, "S");
     pdf.setFont("helvetica", "bold"); pdf.setFontSize(8); pdf.setTextColor(40, 40, 40);
     pdf.text(`${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}.`, x + 1.5, headTop + 4.8);
+    // Beregnungs-Markierung (P1 grün / P2 blau) rechts im Kopf
+    if (irrDays) {
+      const wd = WEEKDAYS[(d.getDay() + 6) % 7];
+      let mx = x + colW - 2;
+      pdf.setFontSize(6.5); pdf.setFont("helvetica", "bold");
+      if (irrDays.p2 && irrDays.p2.includes(wd)) { pdf.setTextColor(29, 111, 184); pdf.text("P2", mx, headTop + 4.6, { align: "right" }); mx -= 6; }
+      if (irrDays.p1 && irrDays.p1.includes(wd)) { pdf.setTextColor(15, 110, 62); pdf.text("P1", mx, headTop + 4.6, { align: "right" }); }
+    }
     // Spaltenkörper
     pdf.rect(x, gridTop, colW, gridH, "S");
     const entries = entriesForDay(d).slice().sort((a, b) => a.start.localeCompare(b.start));
@@ -362,8 +378,8 @@ export default function App() {
         calMode={calMode}
         setCalMode={setCalMode}
         onPrint={() => window.print()}
-        onPdf={() => exportMonthPDF(monthAnchor, entriesForDay)}
-        onWeekPdf={() => exportWeekPDF(days, entriesForDay)}
+        onPdf={() => exportMonthPDF(monthAnchor, entriesForDay, { p1: (irrigation?.p1?.days) || [], p2: (irrigation?.p2?.days) || [] })}
+        onWeekPdf={() => exportWeekPDF(days, entriesForDay, { p1: (irrigation?.p1?.days) || [], p2: (irrigation?.p2?.days) || [] })}
         theme={theme}
         setTheme={setTheme}
       />

@@ -195,14 +195,14 @@ export default function App() {
     try { localStorage.setItem("svd_theme", t); } catch { /* ignore */ }
   };
 
-  const { user, authReady, isLoggedIn, role, isPlatzwart, isTrainer, myTeams, profile, loginEmail, resetPassword, registerEmail, logout, loginAdminPin, pinAdmin } = useAuth();
+  const { user, authReady, isLoggedIn, role, isVorstand, isPlatzwart, isTrainer, canEditIrrigation, myTeams, profile, loginEmail, resetPassword, registerEmail, logout, loginAdminPin, pinAdmin, changePin } = useAuth();
   const isAdmin = isPlatzwart; // Kompatibilität: bestehender Code nutzt isAdmin = Platzwart-Rechte
   const [showLogin, setShowLogin] = useState(false);
   const { bookings, bookingsReady, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries } = useBookings();
   const { locks, locksReady, addLock, removeLock } = useLocks();
   const { notes, notesReady, setNote } = useNotes();
   const { messages, messagesReady, addMessage, setMessageDone, removeMessage } = useMessages();
-  const { users, saveUser, setUserRole, setUserTeams, removeUser } = useUsers(isPlatzwart);
+  const { users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser } = useUsers(isPlatzwart);
 
   const [view, setView] = useState("viewer"); // viewer | trainer | admin
   const [msgsSeen, setMsgsSeen] = useState(false); // Login-Hinweis nur bis zum Ansehen zeigen
@@ -434,7 +434,10 @@ export default function App() {
           saveUser={saveUser}
           setUserRole={setUserRole}
           setUserTeams={setUserTeams}
+          setUserRights={setUserRights}
           removeUser={removeUser}
+          isVorstand={isVorstand}
+          changePin={changePin}
         />
       )}
 
@@ -1083,7 +1086,7 @@ const ADMIN_MENU = [
 ];
 const ADMIN_LABELS = ADMIN_MENU.reduce((acc, g) => { g.items.forEach(([k, l]) => { acc[k] = l; }); return acc; }, {});
 
-function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, removeUser }) {
+function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin }) {
   const [tab, setTab] = useState("belegung");
   const [menuOpen, setMenuOpen] = useState(false);
   const pending = bookings.filter((b) => b.status === "beantragt" && b.date >= dayKey(new Date())).length;
@@ -1147,7 +1150,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDayApproval bookings={bookings} setBookingStatus={setBookingStatus} approveSeries={approveSeries} moveBooking={moveBooking} removeBooking={removeBooking} removeSeries={removeSeries} addMessage={addMessage} />}
       {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} users={users} addMessage={addMessage} />}
-      {tab === "nutzer" && <UserManager users={users} saveUser={saveUser} setUserRole={setUserRole} setUserTeams={setUserTeams} removeUser={removeUser} />}
+      {tab === "nutzer" && <UserManager users={users} saveUser={saveUser} setUserRole={setUserRole} setUserTeams={setUserTeams} setUserRights={setUserRights} removeUser={removeUser} isVorstand={isVorstand} changePin={changePin} />}
     </div>
   );
 }
@@ -1461,10 +1464,62 @@ function MessageInbox({ messages, setMessageDone, removeMessage, users, addMessa
   );
 }
 
-/* ---------------- Nutzerverwaltung (Platzwart) ---------------- */
-function UserManager({ users, saveUser, setUserRole, setUserTeams, removeUser }) {
+/* ---------------- Nutzerverwaltung (Admin) ---------------- */
+function PinChanger({ changePin }) {
+  const [open, setOpen] = useState(false);
+  const [v1, setV1] = useState("");
+  const [v2, setV2] = useState("");
+  const [msg, setMsg] = useState(null);
+
+  const save = async () => {
+    setMsg(null);
+    if (v1.length < 4) { setMsg({ t: "err", x: "PIN muss mindestens 4 Zeichen haben." }); return; }
+    if (v1 !== v2) { setMsg({ t: "err", x: "Die beiden Eingaben stimmen nicht überein." }); return; }
+    try {
+      await changePin(v1);
+      setMsg({ t: "ok", x: "Neue Platzwart-PIN gespeichert." });
+      setV1(""); setV2("");
+    } catch (e) {
+      setMsg({ t: "err", x: e.message || "Speichern fehlgeschlagen." });
+    }
+  };
+
+  return (
+    <div style={{ background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <b style={{ fontSize: 14 }}>🔑 Notfall-PIN (Platzwart-Ebene)</b>
+        <button style={S.navBtn} onClick={() => setOpen((o) => !o)}>{open ? "Schließen" : "PIN ändern"}</button>
+      </div>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>
+            Die PIN gibt nur Platzwart-Rechte (keinen Admin-Zugang). Sie wirkt sofort auf allen Geräten.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <input type="password" inputMode="numeric" placeholder="Neue PIN" value={v1}
+              onChange={(e) => setV1(e.target.value)} style={{ ...S.select, maxWidth: 160 }} />
+            <input type="password" inputMode="numeric" placeholder="Wiederholen" value={v2}
+              onChange={(e) => setV2(e.target.value)} style={{ ...S.select, maxWidth: 160 }} />
+            <button style={S.okBtn} onClick={save}>Speichern</button>
+          </div>
+          {msg && <div style={{ marginTop: 6, fontSize: 13, color: msg.t === "ok" ? "#166534" : C.danger }}>{msg.x}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const RIGHT_DEFS = [
+  ["irrigation", "Beregnung ändern"],
+  ["locks", "Plätze sperren"],
+  ["messages", "Nachrichten an Trainer"],
+  ["notes", "Tagesnotizen pflegen"],
+];
+
+function UserManager({ users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin }) {
   const list = (users || []).slice().sort((a, b) => {
-    if ((a.role === "platzwart") !== (b.role === "platzwart")) return a.role === "platzwart" ? -1 : 1;
+    const rank = (r) => (r === "admin" ? 0 : r === "platzwart" ? 1 : r === "trainer" ? 2 : 3);
+    if (rank(a.role) !== rank(b.role)) return rank(a.role) - rank(b.role);
     return (a.name || a.email || "").localeCompare(b.name || b.email || "");
   });
   const [editId, setEditId] = useState(null);
@@ -1474,37 +1529,85 @@ function UserManager({ users, saveUser, setUserRole, setUserTeams, removeUser })
   const toggleTeam = (tid) => setDraftTeams((d) => d.includes(tid) ? d.filter((x) => x !== tid) : [...d, tid]);
   const saveTeams = (u) => { setUserTeams(u.id, draftTeams); setEditId(null); };
 
-  const noRole = list.filter((u) => u.role !== "trainer" && u.role !== "platzwart");
+  // Variante 2: fehlt rights komplett -> Altbestand -> gilt als "alles an".
+  const rightOn = (u, key) => !u.rights || typeof u.rights !== "object" ? true : u.rights[key] === true;
+  const toggleRight = (u, key) => {
+    const base = (u.rights && typeof u.rights === "object") ? u.rights : { irrigation: true, locks: true, messages: true, notes: true };
+    setUserRights(u.id, { ...base, [key]: !rightOn(u, key) });
+  };
+
+  const noRole = list.filter((u) => u.role !== "trainer" && u.role !== "platzwart" && u.role !== "admin");
 
   return (
     <div>
       <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
-        Übersicht aller angemeldeten Nutzer. Konten werden in der Firebase-Console angelegt; nach der ersten Anmeldung erscheinen sie hier automatisch (mit E-Mail). Rolle und Teams vergibst du hier.
+        Übersicht aller angemeldeten Nutzer. Konten werden in der Firebase-Console angelegt; nach der ersten Anmeldung erscheinen sie hier automatisch. Rolle, Teams und Rechte vergibt der Admin hier.
       </p>
+
+      {isVorstand && <PinChanger changePin={changePin} />}
 
       {noRole.length > 0 && (
         <div style={{ ...S.warnBanner, background: "#fff7ed", color: "#7c2d12", border: "1px solid #fed7aa", display: "block", marginBottom: 12 }}>
-          {noRole.length} neue Anmeldung{noRole.length === 1 ? "" : "en"} ohne Rolle – bitte unten als Trainer freischalten.
+          {noRole.length} neue Anmeldung{noRole.length === 1 ? "" : "en"} ohne Rolle – bitte unten freischalten.
         </div>
       )}
 
       {list.length === 0 && <p style={{ color: C.textSec, fontSize: 14 }}>Noch keine Nutzerprofile vorhanden.</p>}
 
       {list.map((u) => {
-        const isNew = u.role !== "trainer" && u.role !== "platzwart";
+        const isNew = u.role !== "trainer" && u.role !== "platzwart" && u.role !== "admin";
+        const roleBg = u.role === "admin" ? "#c7d2fe" : u.role === "platzwart" ? "#fde68a" : u.role === "trainer" ? "#dbeafe" : "#fed7aa";
+        const roleLabel = u.role === "admin" ? "Admin / Vorstand" : u.role === "platzwart" ? "Platzwart" : u.role === "trainer" ? "Trainer" : "neu – ohne Rolle";
         return (
           <div key={u.id} style={{ ...S.wishRow, flexDirection: "column", alignItems: "stretch", gap: 6, ...(isNew ? { background: "#fff7ed" } : {}) }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
               <div>
                 <b>{u.name || "(ohne Name)"}</b>
-                <span style={{ marginLeft: 8, fontSize: 12, padding: "1px 8px", borderRadius: 10, background: u.role === "platzwart" ? "#fde68a" : u.role === "trainer" ? "#dbeafe" : "#fed7aa", color: "#334" }}>
-                  {u.role === "platzwart" ? "Platzwart" : u.role === "trainer" ? "Trainer" : "neu – ohne Rolle"}
+                <span style={{ marginLeft: 8, fontSize: 12, padding: "1px 8px", borderRadius: 10, background: roleBg, color: "#334" }}>
+                  {roleLabel}
                 </span>
               </div>
               <span style={{ fontSize: 13, color: C.textSec }}>{u.email || "(keine E-Mail)"}</span>
             </div>
 
-            {isNew && (
+            {/* Rollenvergabe – nur Admin */}
+            {isVorstand && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                <span style={{ fontSize: 12, color: C.textSec, alignSelf: "center" }}>Rolle:</span>
+                {["admin", "platzwart", "trainer"].map((r) => (
+                  <button key={r} onClick={() => setUserRole(u.id, r)}
+                    style={{ ...S.roleBtn, ...(u.role === r ? S.roleBtnActive : {}), fontSize: 12 }}>
+                    {r === "admin" ? "Als Admin" : r === "platzwart" ? "Als Platzwart" : "Als Trainer"}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Rechte-Schalter – nur für Platzwarte, nur Admin sieht/ändert sie */}
+            {isVorstand && u.role === "platzwart" && (
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px" }}>
+                <div style={{ fontSize: 12, color: C.textSec, marginBottom: 6 }}>Rechte dieses Platzwarts:</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {RIGHT_DEFS.map(([key, label]) => {
+                    const on = rightOn(u, key);
+                    return (
+                      <button key={key} onClick={() => toggleRight(u, key)}
+                        style={{ ...S.roleBtn, ...(on ? S.roleBtnActive : {}), fontSize: 12 }}
+                        title={on ? "An – klicken zum Abschalten" : "Aus – klicken zum Einschalten"}>
+                        {on ? "✓ " : "○ "}{label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {(!u.rights || typeof u.rights !== "object") && (
+                  <div style={{ fontSize: 11, color: "#92400e", marginTop: 6 }}>
+                    Noch keine Rechte gesetzt – dieser Platzwart hat aktuell alle vier (Altbestand). Sobald du einen Schalter änderst, gilt nur noch die Auswahl.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isNew && isVorstand && (
               <div>
                 <button style={S.okBtn} onClick={() => setUserRole(u.id, "trainer")}>Als Trainer freischalten</button>
               </div>

@@ -1658,7 +1658,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
 
   return (
     <div>
-      <div style={{ fontSize: 11, color: C.textTer, marginBottom: 6 }}>Beregnung · v1.0</div>
       <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
         Beregnungszeiten für beide Plätze. Beide Plätze teilen sich <b>eine Pumpe</b> – es darf nie mehr
         als eine Station gleichzeitig laufen. {canEdit ? "Du kannst die Zeiten ändern." : "Nur ansehen – Änderungsrecht hat der Admin vergeben."}

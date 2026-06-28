@@ -451,6 +451,7 @@ export default function App() {
           removeBooking={removeBooking}
           notes={notes}
           setNote={setNote}
+          irrigation={irrigation}
         />
       )}
 
@@ -1055,7 +1056,11 @@ function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockFor
 /* ---------------- Monatsübersicht (druckbar) ---------------- */
 const MONTHS_LONG = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 
-function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField, isAdmin, removeBooking, notes, setNote }) {
+function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField, isAdmin, removeBooking, notes, setNote, irrigation }) {
+  const irrDays = {
+    p1: (irrigation && irrigation.p1 && irrigation.p1.days) || [],
+    p2: (irrigation && irrigation.p2 && irrigation.p2.days) || [],
+  };
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
   const shiftMonth = (delta) => { const d = new Date(year, month + delta, 1); setMonthAnchor(d); };
@@ -1108,6 +1113,18 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
               opacity: inMonth ? 1 : 0.55,
             }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3, color: today ? C.brand : C.ink }}>{d.getDate()}</div>
+              {(() => {
+                const wd = WEEKDAYS[(d.getDay() + 6) % 7];
+                const p1on = irrDays.p1.includes(wd);
+                const p2on = irrDays.p2.includes(wd);
+                if (!p1on && !p2on) return null;
+                return (
+                  <div style={{ display: "flex", gap: 3, marginBottom: 2 }} title="Beregnung">
+                    {p1on && <span style={{ fontSize: 8.5, color: "#0f6e3e", background: "#e3f1ea", borderRadius: 4, padding: "0 3px", fontWeight: 600 }}>💧P1</span>}
+                    {p2on && <span style={{ fontSize: 8.5, color: "#1d6fb8", background: "#e4eef8", borderRadius: 4, padding: "0 3px", fontWeight: 600 }}>💧P2</span>}
+                  </div>
+                );
+              })()}
               {feiertagAn(d) && <div style={{ fontSize: 8.5, color: "#7a3f00", background: "#ffe8cc", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, overflowWrap: "anywhere" }} title="Feiertag">{feiertagAn(d)}</div>}
               {!feiertagAn(d) && ferienAn(d) && <div style={{ fontSize: 8.5, color: "#1d6b4f", background: "#e1f3ea", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, overflowWrap: "anywhere" }} title="Schulferien">{ferienAn(d)}</div>}
               {anyLock.length > 0 && <div style={{ fontSize: 9, color: C.danger, marginBottom: 2 }}>⛔ gesperrt</div>}

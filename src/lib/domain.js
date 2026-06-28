@@ -345,11 +345,13 @@ export const parseIcsGames = (icsText) => {
     };
     const start = parseIcsDate(get("DTSTART"));
     if (!start) return;
+    const end = parseIcsDate(get("DTEND"));
     const summary = get("SUMMARY");
     const location = get("LOCATION");
     const { home, guest } = teamsFromSummary(summary);
     games.push({
       date: start.date, time: start.time,
+      endTime: end ? end.time : null,
       summary, location, home, guest,
       field: fieldFromLocation(location),
       uid: get("UID"),
@@ -358,7 +360,33 @@ export const parseIcsGames = (icsText) => {
   return games;
 };
 
-// Filtert nur Heimspiele (Ort enthält "Dörfleins") ab heute.
+// Wandelt erkannte BFV-Heimspiele in Buchungs-Einträge (kind=match) um.
+// teamId = die App-Mannschaft, der dieser Kalender zugeordnet ist.
+export const icsGamesToBookings = (games, teamId) => {
+  return (games || [])
+    .filter((g) => g.field) // nur mit erkanntem Platz
+    .map((g) => ({
+      date: g.date,
+      field: g.field,
+      zone: fullZoneOf(g.field) || "voll",
+      team: teamId || g.team,
+      start: g.time,
+      end: g.endTime || addMinutes(g.time, 100), // Fallback 100 Min
+      kind: "match",
+      status: "frei",
+      title: g.summary ? g.summary.split(",")[0] : `${g.home} - ${g.guest}`,
+      bfvUid: g.uid,
+    }));
+};
+
+// kleine Zeit-Hilfe (HH:MM + Minuten)
+const addMinutes = (hhmm, mins) => {
+  const [h, m] = (hhmm || "0:0").split(":").map(Number);
+  const total = h * 60 + m + mins;
+  const hh = String(Math.floor(total / 60) % 24).padStart(2, "0");
+  const mm = String(total % 60).padStart(2, "0");
+  return `${hh}:${mm}`;
+};
 export const homeGamesFromIcs = (icsText, todayKey, homeNeedle = "Dörfleins") => {
   const needle = homeNeedle.toLowerCase();
   return parseIcsGames(icsText)

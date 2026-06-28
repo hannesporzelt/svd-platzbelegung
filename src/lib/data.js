@@ -38,6 +38,21 @@ export function useBookings() {
       const withOwner = { ...b, ownerUid: b.ownerUid || uid() };
       return setDoc(doc(db, "bookings", idFor(withOwner)), withOwner);
     },
+    // Importiert BFV-Spiele: Doc-ID = bfv-<UID>, daher überschreibt ein erneuter
+    // Import dasselbe Spiel (Update bei Verschiebung), statt Dubletten zu erzeugen.
+    importBookings: async (games) => {
+      const batch = writeBatch(db);
+      const owner = uid();
+      let count = 0;
+      games.forEach((g) => {
+        if (!g.bfvUid) return;
+        const id = "bfv-" + String(g.bfvUid).replace(/[^A-Za-z0-9_:-]/g, "");
+        batch.set(doc(db, "bookings", id), { ...g, ownerUid: owner, source: "bfv" });
+        count++;
+      });
+      await batch.commit();
+      return count;
+    },
     addBookingSeries: async (entries) => {
       const batch = writeBatch(db);
       const owner = uid();

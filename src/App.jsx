@@ -4,7 +4,7 @@ import {
   dayKey, mondayOf, addDays, isoWeek, fmtRange, expandRecurrence, zoneCovers,
   autoTrainingForDay, findConflicts, conflictIdsForEntries, effectiveSpan, warmupBlockFor,
   zonesOverlap, timeOverlap,
-  buildIrrigationWindows, findIrrigationOverlaps, passDurationSec, kickoffToStart, computeMatchIrrigation,
+  buildIrrigationWindows, findIrrigationOverlaps, passDurationSec, kickoffToStart, computeMatchIrrigation, homeGamesFromIcs,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
 import { useBookings, useLocks, useMessages, useUsers, useNotes, useIrrigation } from "./lib/data";
@@ -1833,8 +1833,135 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
         </div>
       </div>
 
+      {/* iCal-Import BFV */}
+      <CalendarImport irrigation={irrigation} saveIrrigation={saveIrrigation} canEdit={canEdit} />
+
       {/* Kurzprogramm-Rechner Heimspiel */}
       <KickoffCalc />
+    </div>
+  );
+}
+
+function CalendarImport({ irrigation, saveIrrigation, canEdit }) {
+  const saved = (irrigation && irrigation._calendars) || {};
+  const [cals, setCals] = useState(Array.isArray(saved.list) ? saved.list : []);
+  const [newUrl, setNewUrl] = useState("");
+  const [newTeam, setNewTeam] = useState(TEAMS[0]?.id || "");
+  const [games, setGames] = useState([]);     // erkannte Heimspiele
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  React.useEffect(() => {
+    const s = (irrigation && irrigation._calendars) || {};
+    setCals(Array.isArray(s.list) ? s.list : []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [irrigation?._calendars?.updatedTs]);
+
+  const addCal = () => {
+    const u = newUrl.trim();
+    if (!u) return;
+    setCals((c) => [...c, { url: u, team: newTeam }]);
+    setNewUrl("");
+  };
+  const removeCal = (i) => setCals((c) => c.filter((_, idx) => idx !== i));
+  const saveCals = async () => {
+    try {
+      await saveIrrigation("_calendars", { list: cals });
+      setMsg("Kalender gespeichert.");
+      setTimeout(() => setMsg(null), 2500);
+    } catch (e) {
+      setMsg("Speichern fehlgeschlagen: " + (e.message || ""));
+    }
+  };
+
+  const fetchAll = async () => {
+    setLoading(true); setMsg(null);
+    const today = dayKey(new Date());
+    const all = [];
+    try {
+      for (const c of cals) {
+        const resp = await fetch("/api/bfv-ical?url=" + encodeURIComponent(c.url));
+        if (!resp.ok) { setMsg("Ein Kalender konnte nicht geladen werden."); continue; }
+        const text = await resp.text();
+        homeGamesFromIcs(text, today).forEach((g) => all.push({ ...g, team: c.team }));
+      }
+      all.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+      setGames(all);
+      if (all.length === 0) setMsg("Keine kommenden Heimspiele gefunden.");
+    } catch (e) {
+      setMsg("Abruf fehlgeschlagen: " + (e.message || ""));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ ...S.card, marginTop: 14, background: "#f5f3ff", border: "1px solid #ddd6fe" }}>
+      <h3 style={{ margin: "0 0 6px" }}>📅 Spielplan-Kalender (BFV)</h3>
+      <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>
+        BFV-Kalender-Links hinterlegen (pro Mannschaft einer). „Heimspiele abrufen" liest die
+        Spielpläne und zeigt die Heimspiele in Dörfleins mit Platz und Anpfiff – ohne sie automatisch einzutragen.
+      </p>
+
+      {/* vorhandene Kalender */}
+      {cals.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          {cals.map((c, i) => (
+            <div key={i} style={{ ...S.wishRow }}>
+              <span style={{ fontSize: 12, wordBreak: "break-all" }}>
+                <b>{teamById(c.team)?.name || c.team}</b><br />{c.url}
+              </span>
+              {canEdit && <button style={S.delBtn} onClick={() => removeCal(i)}>Entfernen</button>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* neuen Kalender hinzufügen */}
+      {canEdit && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-end", marginBottom: 8 }}>
+          <label style={{ fontSize: 12, color: C.textSec, flex: "1 1 240px" }}>BFV-Kalender-Link
+            <input type="text" placeholder="https://service.bfv.de/rest/icsexport/..." value={newUrl}
+              onChange={(e) => setNewUrl(e.target.value)} style={{ ...S.select, width: "100%", marginTop: 2 }} />
+          </label>
+          <label style={{ fontSize: 12, color: C.textSec }}>Mannschaft
+            <select value={newTeam} onChange={(e) => setNewTeam(e.target.value)} style={{ ...S.select, marginTop: 2 }}>
+              {TEAMS.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </label>
+          <button style={S.navBtn} onClick={addCal}>+ Hinzufügen</button>
+        </div>
+      )}
+
+      {canEdit && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={S.okBtn} onClick={saveCals}>Kalender speichern</button>
+          <button style={S.navBtn} onClick={fetchAll} disabled={loading || cals.length === 0}>
+            {loading ? "Lade…" : "Heimspiele abrufen"}
+          </button>
+        </div>
+      )}
+      {msg && <div style={{ fontSize: 12, color: C.textSec, marginTop: 6 }}>{msg}</div>}
+
+      {/* erkannte Heimspiele */}
+      {games.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Erkannte Heimspiele</div>
+          {games.map((g, i) => {
+            const d = new Date(g.date + "T12:00");
+            const datum = d.toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" });
+            const platz = g.field === "p1" ? "Platz 1" : g.field === "p2" ? "Platz 2" : (g.field || "?");
+            return (
+              <div key={i} style={{ ...S.wishRow }}>
+                <span style={{ fontSize: 13 }}>
+                  <b>{datum} · {g.time}</b> · {platz}<br />
+                  <span style={{ color: C.textSec }}>{g.home} – {g.guest} ({teamById(g.team)?.name || g.team})</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

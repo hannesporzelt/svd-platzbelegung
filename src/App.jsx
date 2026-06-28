@@ -4,9 +4,10 @@ import {
   dayKey, mondayOf, addDays, isoWeek, fmtRange, expandRecurrence, zoneCovers,
   autoTrainingForDay, findConflicts, conflictIdsForEntries, effectiveSpan, warmupBlockFor,
   zonesOverlap, timeOverlap,
+  buildIrrigationWindows, findIrrigationOverlaps, passDurationSec, kickoffToStart,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
-import { useBookings, useLocks, useMessages, useUsers, useNotes } from "./lib/data";
+import { useBookings, useLocks, useMessages, useUsers, useNotes, useIrrigation } from "./lib/data";
 import { C, S } from "./lib/styles";
 import { ferienAn, feiertagAn } from "./lib/feiertage";
 import Pitch from "./components/Pitch";
@@ -203,6 +204,7 @@ export default function App() {
   const { notes, notesReady, setNote } = useNotes();
   const { messages, messagesReady, addMessage, setMessageDone, removeMessage } = useMessages();
   const { users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser } = useUsers(isPlatzwart);
+  const { irrigation, irrigationReady, saveIrrigation } = useIrrigation();
 
   const [view, setView] = useState("viewer"); // viewer | trainer | admin
   const [msgsSeen, setMsgsSeen] = useState(false); // Login-Hinweis nur bis zum Ansehen zeigen
@@ -445,6 +447,9 @@ export default function App() {
           removeUser={removeUser}
           isVorstand={isVorstand}
           changePin={changePin}
+          irrigation={irrigation}
+          saveIrrigation={saveIrrigation}
+          canEditIrrigation={canEditIrrigation}
         />
       )}
 
@@ -1104,10 +1109,13 @@ const ADMIN_MENU = [
   { group: "Kommunikation", items: [
     ["nachrichten", "Nachrichten"],
   ] },
+  { group: "Pflege", items: [
+    ["beregnung", "Beregnung"],
+  ] },
 ];
 const ADMIN_LABELS = ADMIN_MENU.reduce((acc, g) => { g.items.forEach(([k, l]) => { acc[k] = l; }); return acc; }, {});
 
-function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin }) {
+function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, canEditIrrigation }) {
   const [tab, setTab] = useState("belegung");
   const [menuOpen, setMenuOpen] = useState(false);
   const pending = bookings.filter((b) => b.status === "beantragt" && b.date >= dayKey(new Date())).length;
@@ -1171,6 +1179,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDayApproval bookings={bookings} setBookingStatus={setBookingStatus} approveSeries={approveSeries} moveBooking={moveBooking} removeBooking={removeBooking} removeSeries={removeSeries} addMessage={addMessage} />}
       {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} users={users} addMessage={addMessage} />}
+      {tab === "beregnung" && <IrrigationPanel irrigation={irrigation} saveIrrigation={saveIrrigation} canEdit={canEditIrrigation} bookings={bookings} />}
     </div>
   );
 }
@@ -1480,6 +1489,235 @@ function MessageInbox({ messages, setMessageDone, removeMessage, users, addMessa
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------------- Beregnung ---------------- */
+const IRR_FIELDS = [
+  { id: "p1", name: "Platz 1", geraet: "Regulus" },
+  { id: "p2", name: "Platz 2", geraet: "Water Control+ SC" },
+];
+const IRR_WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const IRR_DEFAary = {
+  p1: { days: ["Mo", "Do"], runMin: 15, gapSec: 5, stations: 12, starts: ["00:45", "03:55"] },
+  p2: { days: ["Mi", "Fr"], runMin: 15, gapSec: 5, stations: 12, starts: ["00:45", "03:55"] },
+};
+
+function IrrigationPanel({ irrigation, saveIrrigation, canEdit }) {
+  // lokale Entwürfe je Platz (erst speichern schreibt nach Firestore)
+  const initial = (fid) => {
+    const fromDb = irrigation && irrigation[fid];
+    return fromDb ? { ...IRR_DEFAary[fid], ...fromDb } : { ...IRR_DEFAary[fid] };
+  };
+  const [draft, setDraft] = useState({ p1: initial("p1"), p2: initial("p2") });
+  const [savedMsg, setSavedMsg] = useState(null);
+
+  // Wenn Firestore-Daten (nach)geladen werden, Entwurf aktualisieren – aber nur,
+  // solange der Nutzer nicht gerade tippt (einfacher Ansatz: beim ersten Laden).
+  useEffect(() => {
+    setDraft({ p1: initial("p1"), p2: initial("p2") });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [irrigation?.p1?.updatedTs, irrigation?.p2?.updatedTs]);
+
+  const upd = (fid, patch) => setDraft((d) => ({ ...d, [fid]: { ...d[fid], ...patch } }));
+  const toggleDay = (fid, wd) => {
+    const cur = draft[fid].days || [];
+    upd(fid, { days: cur.includes(wd) ? cur.filter((x) => x !== wd) : [...cur, wd] });
+  };
+  const setStart = (fid, idx, val) => {
+    const s = [...(draft[fid].starts || [])];
+    s[idx] = val;
+    upd(fid, { starts: s });
+  };
+
+  // Fenster beider Plätze für die Pumpen-Prüfung (gemeinsame Pumpe!)
+  const allWindows = [];
+  ["p1", "p2"].forEach((fid) => {
+    buildIrrigationWindows({
+      fieldId: fid,
+      starts: (draft[fid].starts || []).filter(Boolean),
+      stations: draft[fid].stations || 12,
+      runMin: draft[fid].runMin || 15,
+      gapSec: draft[fid].gapSec || 0,
+    }).forEach((w) => allWindows.push(w));
+  });
+  // Tagesabhängig prüfen: nur Plätze, die am selben Wochentag laufen, teilen die Pumpe.
+  const overlapsByDay = {};
+  IRR_WEEKDAYS.forEach((wd) => {
+    const todays = [];
+    ["p1", "p2"].forEach((fid) => {
+      if ((draft[fid].days || []).includes(wd)) {
+        buildIrrigationWindows({
+          fieldId: fid,
+          starts: (draft[fid].starts || []).filter(Boolean),
+          stations: draft[fid].stations || 12,
+          runMin: draft[fid].runMin || 15,
+          gapSec: draft[fid].gapSec || 0,
+        }).forEach((w) => todays.push(w));
+      }
+    });
+    const conf = findIrrigationOverlaps(todays);
+    if (conf.length > 0) overlapsByDay[wd] = conf;
+  });
+  const hasOverlap = Object.keys(overlapsByDay).length > 0;
+
+  const save = async (fid) => {
+    if (hasOverlap) return; // bei Pumpen-Konflikt nicht speichern
+    try {
+      await saveIrrigation(fid, draft[fid]);
+      setSavedMsg(`${IRR_FIELDS.find((f) => f.id === fid).name} gespeichert.`);
+      setTimeout(() => setSavedMsg(null), 2500);
+    } catch (e) {
+      setSavedMsg("Speichern fehlgeschlagen: " + (e.message || ""));
+    }
+  };
+
+  return (
+    <div>
+      <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
+        Beregnungszeiten für beide Plätze. Beide Plätze teilen sich <b>eine Pumpe</b> – es darf nie mehr
+        als eine Station gleichzeitig laufen. {canEdit ? "Du kannst die Zeiten ändern." : "Nur ansehen – Änderungsrecht hat der Admin vergeben."}
+      </p>
+
+      {hasOverlap && (
+        <div style={{ ...S.warnBanner, background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", display: "block", marginBottom: 12 }}>
+          ⚠️ <b>Pumpen-Konflikt:</b> An folgenden Tagen überschneiden sich Stationen beider Plätze:{" "}
+          {Object.keys(overlapsByDay).join(", ")}. Bitte Startzeiten oder Tage anpassen. Solange ein Konflikt besteht, ist Speichern gesperrt.
+        </div>
+      )}
+      {savedMsg && (
+        <div style={{ ...S.warnBanner, background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0", display: "block", marginBottom: 12 }}>
+          ✓ {savedMsg}
+        </div>
+      )}
+
+      {IRR_FIELDS.map((f) => {
+        const d = draft[f.id];
+        const windows = buildIrrigationWindows({
+          fieldId: f.id, starts: (d.starts || []).filter(Boolean),
+          stations: d.stations || 12, runMin: d.runMin || 15, gapSec: d.gapSec || 0,
+        });
+        const lastEnd = windows.length ? windows[windows.length - 1].end : "—";
+        return (
+          <div key={f.id} style={{ ...S.card, marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6 }}>
+              <h3 style={{ margin: "0 0 6px" }}>{f.name} <span style={{ fontSize: 12, color: C.textSec, fontWeight: 400 }}>· {f.geraet}</span></h3>
+              <span style={{ fontSize: 12, color: C.textSec }}>Ende letzte Station: <b>{lastEnd}</b></span>
+            </div>
+
+            {/* Wochentage */}
+            <div style={{ margin: "8px 0" }}>
+              <div style={{ fontSize: 12, color: C.textSec, marginBottom: 4 }}>Bewässerungstage</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {IRR_WEEKDAYS.map((wd) => {
+                  const on = (d.days || []).includes(wd);
+                  return (
+                    <button key={wd} disabled={!canEdit} onClick={() => toggleDay(f.id, wd)}
+                      style={{ ...S.roleBtn, ...(on ? S.roleBtnActive : {}), fontSize: 12, opacity: canEdit ? 1 : 0.6 }}>
+                      {wd}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Parameter */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, margin: "8px 0" }}>
+              <label style={{ fontSize: 12, color: C.textSec }}>
+                Laufzeit/Station (Min)
+                <input type="number" min="1" max="99" disabled={!canEdit} value={d.runMin}
+                  onChange={(e) => upd(f.id, { runMin: Number(e.target.value) })}
+                  style={{ ...S.select, maxWidth: 90, marginTop: 2 }} />
+              </label>
+              <label style={{ fontSize: 12, color: C.textSec }}>
+                Pause/Station (Sek)
+                <input type="number" min="0" max="99" disabled={!canEdit} value={d.gapSec}
+                  onChange={(e) => upd(f.id, { gapSec: Number(e.target.value) })}
+                  style={{ ...S.select, maxWidth: 90, marginTop: 2 }} />
+              </label>
+            </div>
+
+            {/* Startzeiten der Durchgänge */}
+            <div style={{ margin: "8px 0" }}>
+              <div style={{ fontSize: 12, color: C.textSec, marginBottom: 4 }}>Startzeiten der Durchgänge</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {[0, 1].map((idx) => (
+                  <input key={idx} type="time" disabled={!canEdit} value={(d.starts || [])[idx] || ""}
+                    onChange={(e) => setStart(f.id, idx, e.target.value)}
+                    style={{ ...S.select, maxWidth: 130 }} />
+                ))}
+              </div>
+            </div>
+
+            {/* Stationszeiten-Vorschau */}
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ cursor: "pointer", fontSize: 13, color: C.brand }}>Stationszeiten anzeigen</summary>
+              <div style={{ marginTop: 6, fontSize: 12, color: C.textSec, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 4 }}>
+                {windows.map((w, i) => (
+                  <div key={i}>D{w.pass} · Station {w.station}: <b>{w.start}–{w.end}</b></div>
+                ))}
+              </div>
+            </details>
+
+            {canEdit && (
+              <div style={{ marginTop: 10 }}>
+                <button style={{ ...S.okBtn, opacity: hasOverlap ? 0.5 : 1, cursor: hasOverlap ? "not-allowed" : "pointer" }}
+                  onClick={() => save(f.id)} disabled={hasOverlap}>
+                  {f.name} speichern
+                </button>
+                {hasOverlap && <span style={{ fontSize: 12, color: "#991b1b", marginLeft: 8 }}>Erst Pumpen-Konflikt lösen</span>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Kurzprogramm-Rechner Heimspiel */}
+      <KickoffCalc />
+    </div>
+  );
+}
+
+function KickoffCalc() {
+  const [kickoff, setKickoff] = useState("15:00");
+  const [runMin, setRunMin] = useState(5);
+  const [gapSec, setGapSec] = useState(5);
+  const [endOffset, setEndOffset] = useState(30);
+  // Kurzprogramm Platz 1: 12 Stationen, Tor-Regner (3,12,7,8) zuletzt -> als Prog. C
+  const totalDur = passDurationSec(12, runMin, gapSec);
+  const torDur = passDurationSec(4, runMin, gapSec);   // 4 Tor-Stationen
+  const restDur = passDurationSec(8, runMin, gapSec);  // 8 übrige
+  const cCalc = kickoffToStart(kickoff, torDur, endOffset);   // Prog. C endet 30 Min vor Anpfiff
+  // Prog. B endet, wenn Prog. C startet -> von dort restDur zurückrechnen.
+  const bCalc = kickoffToStart(cCalc.start, restDur, 0);
+
+  return (
+    <div style={{ ...S.card, marginTop: 14, background: "#fff7ed", border: "1px solid #fed7aa" }}>
+      <h3 style={{ margin: "0 0 6px" }}>🏟 Kurzprogramm Heimspiel · Platz 1</h3>
+      <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>
+        Rechnet die Startzeiten zurück, sodass die Beregnung {endOffset} Min vor Anpfiff endet.
+        Tor-Regner (3, 12, 7, 8) laufen zuletzt als Programm C, die übrigen 8 davor als Programm B.
+      </p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <label style={{ fontSize: 12, color: C.textSec }}>Anpfiff
+          <input type="time" value={kickoff} onChange={(e) => setKickoff(e.target.value)} style={{ ...S.select, maxWidth: 120, marginTop: 2 }} />
+        </label>
+        <label style={{ fontSize: 12, color: C.textSec }}>Laufzeit/Station (Min)
+          <input type="number" min="1" max="30" value={runMin} onChange={(e) => setRunMin(Number(e.target.value))} style={{ ...S.select, maxWidth: 90, marginTop: 2 }} />
+        </label>
+        <label style={{ fontSize: 12, color: C.textSec }}>Pause (Sek)
+          <input type="number" min="0" max="30" value={gapSec} onChange={(e) => setGapSec(Number(e.target.value))} style={{ ...S.select, maxWidth: 90, marginTop: 2 }} />
+        </label>
+        <label style={{ fontSize: 12, color: C.textSec }}>Ende vor Anpfiff (Min)
+          <input type="number" min="0" max="120" value={endOffset} onChange={(e) => setEndOffset(Number(e.target.value))} style={{ ...S.select, maxWidth: 90, marginTop: 2 }} />
+        </label>
+      </div>
+      <div style={{ marginTop: 10, fontSize: 14 }}>
+        <div>▶ <b>Programm B</b> (8 Stationen, ohne Tor) starten: <b>{bCalc.start}</b></div>
+        <div>▶ <b>Programm C</b> (Tor-Regner 3, 12, 7, 8) starten: <b>{cCalc.start}</b></div>
+        <div style={{ color: C.textSec, marginTop: 4 }}>Ende (30 Min vor Anpfiff): {cCalc.end} · Gesamtdauer ca. {Math.round(totalDur / 60)} Min</div>
+      </div>
     </div>
   );
 }

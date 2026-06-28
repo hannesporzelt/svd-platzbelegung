@@ -4,7 +4,7 @@ import {
   dayKey, mondayOf, addDays, isoWeek, fmtRange, expandRecurrence, zoneCovers,
   autoTrainingForDay, findConflicts, conflictIdsForEntries, effectiveSpan, warmupBlockFor,
   zonesOverlap, timeOverlap,
-  buildIrrigationWindows, findIrrigationOverlaps, passDurationSec, kickoffToStart, computeMatchIrrigation, homeGamesFromIcs,
+  buildIrrigationWindows, findIrrigationOverlaps, passDurationSec, kickoffToStart, computeMatchIrrigation, homeGamesFromIcs, icsGamesToBookings,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
 import { useBookings, useLocks, useMessages, useUsers, useNotes, useIrrigation } from "./lib/data";
@@ -199,7 +199,7 @@ export default function App() {
   const { user, authReady, isLoggedIn, role, isVorstand, isPlatzwart, isTrainer, canEditIrrigation, myTeams, profile, loginEmail, resetPassword, registerEmail, logout, loginAdminPin, pinAdmin, changePin } = useAuth();
   const isAdmin = isPlatzwart; // Kompatibilität: bestehender Code nutzt isAdmin = Platzwart-Rechte
   const [showLogin, setShowLogin] = useState(false);
-  const { bookings, bookingsReady, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries } = useBookings();
+  const { bookings, bookingsReady, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, importBookings } = useBookings();
   const { locks, locksReady, addLock, removeLock } = useLocks();
   const { notes, notesReady, setNote } = useNotes();
   const { messages, messagesReady, addMessage, setMessageDone, removeMessage } = useMessages();
@@ -492,6 +492,9 @@ export default function App() {
           removeUser={removeUser}
           isVorstand={isVorstand}
           changePin={changePin}
+          irrigation={irrigation}
+          saveIrrigation={saveIrrigation}
+          importBookings={importBookings}
         />
       )}
 
@@ -1833,22 +1836,20 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
         </div>
       </div>
 
-      {/* iCal-Import BFV */}
-      <CalendarImport irrigation={irrigation} saveIrrigation={saveIrrigation} canEdit={canEdit} />
-
       {/* Kurzprogramm-Rechner Heimspiel */}
       <KickoffCalc />
     </div>
   );
 }
 
-function CalendarImport({ irrigation, saveIrrigation, canEdit }) {
+function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings }) {
   const saved = (irrigation && irrigation._calendars) || {};
   const [cals, setCals] = useState(Array.isArray(saved.list) ? saved.list : []);
   const [newUrl, setNewUrl] = useState("");
   const [newTeam, setNewTeam] = useState(TEAMS[0]?.id || "");
-  const [games, setGames] = useState([]);     // erkannte Heimspiele
+  const [games, setGames] = useState([]);     // erkannte Heimspiele (mit team)
   const [loading, setLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState(null);
 
   React.useEffect(() => {
@@ -1892,6 +1893,23 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit }) {
       setMsg("Abruf fehlgeschlagen: " + (e.message || ""));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const doImport = async () => {
+    if (!importBookings || games.length === 0) return;
+    setImporting(true); setMsg(null);
+    try {
+      const bookings = [];
+      games.forEach((g) => {
+        icsGamesToBookings([g], g.team).forEach((b) => bookings.push(b));
+      });
+      const n = await importBookings(bookings);
+      setMsg(`${n} Heimspiel(e) in den Plan eingetragen/aktualisiert.`);
+    } catch (e) {
+      setMsg("Eintragen fehlgeschlagen: " + (e.message || ""));
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -1946,7 +1964,14 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit }) {
       {/* erkannte Heimspiele */}
       {games.length > 0 && (
         <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Erkannte Heimspiele</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Erkannte Heimspiele ({games.length})</div>
+            {canEdit && (
+              <button style={S.primaryBtn} onClick={doImport} disabled={importing}>
+                {importing ? "Trage ein…" : "In Plan eintragen"}
+              </button>
+            )}
+          </div>
           {games.map((g, i) => {
             const d = new Date(g.date + "T12:00");
             const datum = d.toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" });
@@ -2010,7 +2035,7 @@ function KickoffCalc() {
 }
 
 /* ---------------- Vorstand-Bereich (nur Admin) ---------------- */
-function VorstandPanel({ users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin }) {
+function VorstandPanel({ users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, importBookings }) {
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
       <h2 style={{ marginTop: 0, fontSize: 20, display: "flex", alignItems: "center", gap: 8 }}>
@@ -2028,6 +2053,12 @@ function VorstandPanel({ users, saveUser, setUserRole, setUserTeams, setUserRigh
         removeUser={removeUser}
         isVorstand={isVorstand}
         changePin={changePin}
+      />
+      <CalendarImport
+        irrigation={irrigation}
+        saveIrrigation={saveIrrigation}
+        canEdit={isVorstand}
+        importBookings={importBookings}
       />
     </div>
   );

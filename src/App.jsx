@@ -1212,6 +1212,12 @@ const ADMIN_LABELS = ADMIN_MENU.reduce((acc, g) => { g.items.forEach(([k, l]) =>
 function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, canEditIrrigation }) {
   const [tab, setTab] = useState("belegung");
   const [menuOpen, setMenuOpen] = useState(false);
+  // Welche Menügruppe ist aufgeklappt? Standard: die Gruppe des aktiven Tabs.
+  const groupOfTab = (t) => {
+    const g = ADMIN_MENU.find((grp) => grp.items.some(([k]) => k === t));
+    return g ? g.group : ADMIN_MENU[0].group;
+  };
+  const [openGroup, setOpenGroup] = useState(groupOfTab("belegung"));
   const pending = bookings.filter((b) => b.status === "beantragt" && b.date >= dayKey(new Date())).length;
   const openMsg = messages.filter((m) => !m.done && m.dir !== "out").length;
   // Anzahl Tage mit Konflikten ab heute (für Badge im Menü)
@@ -1226,14 +1232,15 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
   // Badge-Zahl je Menüpunkt
   const badgeFor = (k) => k === "trainingstage" ? pending : k === "nachrichten" ? openMsg : k === "konflikte" ? conflictDayCount : 0;
 
-  const choose = (k) => { setTab(k); setMenuOpen(false); };
+  const choose = (k) => { setTab(k); setOpenGroup(groupOfTab(k)); setMenuOpen(false); };
+  const openMenu = () => { setOpenGroup(groupOfTab(tab)); setMenuOpen((o) => !o); };
 
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
       {/* Klappmenü-Kopf: zeigt aktuellen Bereich, öffnet die Gruppenliste */}
       <div style={{ position: "relative", marginBottom: 14 }}>
         <button
-          onClick={() => setMenuOpen((o) => !o)}
+          onClick={openMenu}
           style={{ ...S.navBtn, display: "flex", alignItems: "center", gap: 8, fontWeight: 500, width: "100%", justifyContent: "space-between" }}>
           <span>☰ {ADMIN_LABELS[tab] || "Menü"}</span>
           <span style={{ color: C.textSec, fontSize: 12 }}>{menuOpen ? "▲" : "▼"}</span>
@@ -1243,22 +1250,35 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
             {/* Klick außerhalb schließt das Menü */}
             <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
             <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 8px 28px rgba(0,0,0,0.16)", padding: 8, maxHeight: 380, overflowY: "auto" }}>
-              {ADMIN_MENU.map((grp) => (
-                <div key={grp.group} style={{ marginBottom: 6 }}>
-                  <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "6px 8px 2px" }}>{grp.group}</div>
-                  {grp.items.map(([k, l]) => {
-                    const b = badgeFor(k);
-                    const active = tab === k;
-                    return (
-                      <button key={k} onClick={() => choose(k)}
-                        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left", border: "none", background: active ? C.brand : "transparent", color: active ? "#fff" : C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>
-                        <span>{l}</span>
-                        {b > 0 && <span style={{ ...S.badge, ...(active ? { background: "#fff", color: C.brand } : {}) }}>{b}</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
+              {ADMIN_MENU.map((grp) => {
+                const expanded = openGroup === grp.group;
+                // Anzahl ungelesener Badges in dieser Gruppe (für zugeklappte Anzeige)
+                const groupBadge = grp.items.reduce((sum, [k]) => sum + (badgeFor(k) || 0), 0);
+                return (
+                  <div key={grp.group} style={{ marginBottom: 4 }}>
+                    <button
+                      onClick={() => setOpenGroup(expanded ? null : grp.group)}
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.textSec, cursor: "pointer", fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", padding: "6px 8px", fontWeight: 600 }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {grp.group}
+                        {!expanded && groupBadge > 0 && <span style={{ ...S.badge }}>{groupBadge}</span>}
+                      </span>
+                      <span style={{ fontSize: 10 }}>{expanded ? "▲" : "▼"}</span>
+                    </button>
+                    {expanded && grp.items.map(([k, l]) => {
+                      const b = badgeFor(k);
+                      const active = tab === k;
+                      return (
+                        <button key={k} onClick={() => choose(k)}
+                          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left", border: "none", background: active ? C.brand : "transparent", color: active ? "#fff" : C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>
+                          <span>{l}</span>
+                          {b > 0 && <span style={{ ...S.badge, ...(active ? { background: "#fff", color: C.brand } : {}) }}>{b}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           </>
         )}

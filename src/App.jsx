@@ -1630,6 +1630,20 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [irrigation?._auto?.updatedTs]);
 
+  // Rohtext der Tor-Regner-Felder, damit man beim Tippen Kommas setzen kann.
+  // Erst beim Speichern wird in Zahlen-Arrays umgewandelt.
+  const [torP1Text, setTorP1Text] = useState((autoFromDb.torP1 || [3, 12, 7, 8]).join(", "));
+  const [torP2Text, setTorP2Text] = useState((autoFromDb.torP2 || []).join(", "));
+  React.useEffect(() => {
+    const a = (irrigation && irrigation._auto) || {};
+    setTorP1Text((a.torP1 || [3, 12, 7, 8]).join(", "));
+    setTorP2Text((a.torP2 || []).join(", "));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [irrigation?._auto?.updatedTs]);
+
+  const parseStations = (txt) =>
+    (txt || "").split(",").map((x) => parseInt(x.trim(), 10)).filter((n) => !isNaN(n));
+
   const toggleTrigger = (tid) => setAuto((a) => ({
     ...a,
     triggerTeams: a.triggerTeams.includes(tid)
@@ -1638,7 +1652,11 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
   }));
   const saveAuto = async () => {
     try {
-      await saveIrrigation("_auto", auto);
+      const torP1 = parseStations(torP1Text);
+      const torP2 = parseStations(torP2Text);
+      const toSave = { ...auto, torP1, torP2 };
+      setAuto(toSave);
+      await saveIrrigation("_auto", toSave);
       setSavedMsg("Heimspiel-Einstellungen gespeichert.");
       setTimeout(() => setSavedMsg(null), 2500);
     } catch (e) {
@@ -1651,8 +1669,8 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
   const matchPlan = computeMatchIrrigation(
     bookings, auto.triggerTeams,
     {
-      p1: { runMin: auto.shortRunMin, gapSec: auto.shortGapSec, torStations: auto.torP1, stations: 12, endOffsetMin: auto.endOffsetMin },
-      p2: { runMin: auto.shortRunMin, gapSec: auto.shortGapSec, torStations: auto.torP2, stations: 12, endOffsetMin: auto.endOffsetMin },
+      p1: { runMin: auto.shortRunMin, gapSec: auto.shortGapSec, torStations: parseStations(torP1Text), stations: 12, endOffsetMin: auto.endOffsetMin },
+      p2: { runMin: auto.shortRunMin, gapSec: auto.shortGapSec, torStations: parseStations(torP2Text), stations: 12, endOffsetMin: auto.endOffsetMin },
     },
     today
   );
@@ -1858,13 +1876,15 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
               style={{ ...S.select, maxWidth: 90, marginTop: 2 }} />
           </label>
           <label style={{ fontSize: 12, color: C.textSec }}>Tor-Regner Platz 1 (Nr., Komma)
-            <input type="text" disabled={!canEdit} value={auto.torP1.join(", ")}
-              onChange={(e) => setAuto((a) => ({ ...a, torP1: e.target.value.split(",").map((x) => parseInt(x.trim(), 10)).filter((n) => !isNaN(n)) }))}
+            <input type="text" disabled={!canEdit} value={torP1Text}
+              onChange={(e) => setTorP1Text(e.target.value)}
+              placeholder="z.B. 3, 12, 7, 8"
               style={{ ...S.select, maxWidth: 160, marginTop: 2 }} />
           </label>
           <label style={{ fontSize: 12, color: C.textSec }}>Tor-Regner Platz 2 (Nr., Komma)
-            <input type="text" disabled={!canEdit} value={auto.torP2.join(", ")}
-              onChange={(e) => setAuto((a) => ({ ...a, torP2: e.target.value.split(",").map((x) => parseInt(x.trim(), 10)).filter((n) => !isNaN(n)) }))}
+            <input type="text" disabled={!canEdit} value={torP2Text}
+              onChange={(e) => setTorP2Text(e.target.value)}
+              placeholder="z.B. 4, 9"
               style={{ ...S.select, maxWidth: 160, marginTop: 2 }} />
           </label>
         </div>

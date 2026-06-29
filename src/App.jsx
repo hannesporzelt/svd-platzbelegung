@@ -1938,12 +1938,49 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [autoMsg, setAutoMsg] = useState(null);
+  const autoRanRef = useRef(false);
 
   React.useEffect(() => {
     const s = (irrigation && irrigation._calendars) || {};
     setCals(Array.isArray(s.list) ? s.list : []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [irrigation?._calendars?.updatedTs]);
+
+  // Automatischer Abruf + Eintrag beim Öffnen des Vorstand-Bereichs.
+  // Läuft nur einmal pro Sitzung, nur wenn Kalender hinterlegt sind und
+  // der Nutzer eintragen darf. Nutzt den vorhandenen Platz-Schutz.
+  React.useEffect(() => {
+    if (autoRanRef.current) return;
+    if (!canEdit || !importBookings) return;
+    const list = (irrigation && irrigation._calendars && irrigation._calendars.list) || [];
+    if (!Array.isArray(list) || list.length === 0) return;
+    autoRanRef.current = true;
+    (async () => {
+      try {
+        setAutoMsg("Heimspiele werden automatisch abgeglichen…");
+        const today = dayKey(new Date());
+        const all = [];
+        for (const c of list) {
+          try {
+            const resp = await fetch("/api/bfv-ical?url=" + encodeURIComponent(c.url));
+            if (!resp.ok) continue;
+            const text = await resp.text();
+            homeGamesFromIcs(text, today).forEach((g) => all.push({ ...g, team: c.team }));
+          } catch { /* einzelnen Kalender überspringen */ }
+        }
+        if (all.length === 0) { setAutoMsg(null); return; }
+        const newBookings = [];
+        all.forEach((g) => icsGamesToBookings([g], g.team).forEach((b) => newBookings.push(b)));
+        const n = await importBookings(newBookings, bookings);
+        setAutoMsg(`${n} Heimspiel(e) automatisch abgeglichen.`);
+        setTimeout(() => setAutoMsg(null), 4000);
+      } catch {
+        setAutoMsg(null);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [irrigation?._calendars?.updatedTs, canEdit]);
 
   const addCal = () => {
     const u = newUrl.trim();
@@ -2004,9 +2041,14 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
     <div style={{ ...S.card, marginTop: 14, background: "#f5f3ff", border: "1px solid #ddd6fe" }}>
       <h3 style={{ margin: "0 0 6px" }}>📅 Spielplan-Kalender (BFV)</h3>
       <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>
-        BFV-Kalender-Links hinterlegen (pro Mannschaft einer). „Heimspiele abrufen" liest die
-        Spielpläne und zeigt die Heimspiele in Dörfleins mit Platz und Anpfiff – ohne sie automatisch einzutragen.
+        BFV-Kalender-Links hinterlegen (pro Mannschaft einer). Beim Öffnen dieses Bereichs werden die
+        Heimspiele automatisch abgeglichen und eingetragen. Manuell geht es jederzeit über die Knöpfe unten.
       </p>
+      {autoMsg && (
+        <div style={{ ...S.warnBanner, background: "#eff6ff", color: "#1e40af", border: "1px solid #bfdbfe", display: "block", marginBottom: 10 }}>
+          🔄 {autoMsg}
+        </div>
+      )}
 
       {/* vorhandene Kalender */}
       {cals.length > 0 && (

@@ -190,6 +190,21 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+// Erkennt schmale Bildschirme (Handy). Layout richtet sich nach Bildschirmbreite,
+// nicht nach Rolle – so bekommt jeder am Handy die mobile Ansicht, am PC die breite.
+function useIsMobile(maxWidth = 720) {
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== "undefined" ? window.innerWidth <= maxWidth : false
+  );
+  React.useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= maxWidth);
+    window.addEventListener("resize", onResize);
+    onResize();
+    return () => window.removeEventListener("resize", onResize);
+  }, [maxWidth]);
+  return isMobile;
+}
+
 export default function App() {
   // ----- Theme (hell / dunkel / automatisch) -----
   const [theme, setThemeState] = useState(() => {
@@ -817,6 +832,16 @@ function WeekNav({ weekStart, setWeekStart }) {
 
 /* ---------------- Wochenraster ---------------- */
 function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove, notes, setNote, teamFilter, setTeamFilter, myTeams, irrigation }) {
+  const isMobile = useIsMobile();
+  // Auf dem Handy: nur EIN Tag sichtbar, durch die Woche blättern.
+  // Standard: heutiger Tag, falls in dieser Woche, sonst erster Tag.
+  const todayIdx = days.findIndex((d) => dayKey(d) === dayKey(new Date()));
+  const [dayIdx, setDayIdx] = useState(todayIdx >= 0 ? todayIdx : 0);
+  React.useEffect(() => {
+    const t = days.findIndex((d) => dayKey(d) === dayKey(new Date()));
+    setDayIdx(t >= 0 ? t : 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days[0] && dayKey(days[0])]);
   // Beregnungstage je Platz (für Tropfen-Markierung im Plan)
   const irrDays = {
     p1: (irrigation && irrigation.p1 && irrigation.p1.days) || [],
@@ -856,8 +881,8 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
           </button>
         )}
       </div>
-      <div style={S.weekRow}>
-        {days.map((d) => {
+      {(() => {
+        const renderDay = (d) => {
           const all = entriesForDay(d);
           const conflictIds = conflictIdsForEntries(all);
           const fieldEntries = all.filter((e) => e.field === activeField);
@@ -868,7 +893,7 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
           const dk = dayKey(d);
           const note = notes && notes[dk];
           return (
-            <div key={dk} style={{ ...S.dayCol, ...(today ? S.dayToday : {}) }}>
+            <div key={dk} style={{ ...S.dayCol, ...(today ? S.dayToday : {}), ...(isMobile ? { minWidth: 0, width: "100%" } : {}) }}>
               <div style={S.dayHead}>
                 <span style={{ fontWeight: 500 }}>{WEEKDAYS[(d.getDay() + 6) % 7]}</span>
                 <span style={{ color: C.textSec, fontSize: 12 }}>{d.getDate()}.{d.getMonth() + 1}.</span>
@@ -924,8 +949,42 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
               )}
             </div>
           );
-        })}
-      </div>
+        };
+
+        if (isMobile) {
+          const d = days[Math.min(dayIdx, days.length - 1)];
+          return (
+            <div>
+              {/* Blätter-Leiste fürs Handy */}
+              <div className="no-print" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+                <button onClick={() => setDayIdx((i) => Math.max(0, i - 1))} disabled={dayIdx <= 0}
+                  style={{ ...S.navBtn, opacity: dayIdx <= 0 ? 0.4 : 1, padding: "8px 14px" }}>← Vortag</button>
+                <span style={{ fontWeight: 600, fontSize: 14, textAlign: "center" }}>
+                  {WEEKDAYS_LONG ? WEEKDAYS_LONG[(d.getDay() + 6) % 7] : WEEKDAYS[(d.getDay() + 6) % 7]}, {d.getDate()}.{d.getMonth() + 1}.
+                </span>
+                <button onClick={() => setDayIdx((i) => Math.min(days.length - 1, i + 1))} disabled={dayIdx >= days.length - 1}
+                  style={{ ...S.navBtn, opacity: dayIdx >= days.length - 1 ? 0.4 : 1, padding: "8px 14px" }}>Folgetag →</button>
+              </div>
+              {/* Schnellwahl der Wochentage */}
+              <div className="no-print" style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap", justifyContent: "center" }}>
+                {days.map((dd, i) => {
+                  const sel = i === dayIdx;
+                  const isToday = dayKey(dd) === dayKey(new Date());
+                  return (
+                    <button key={i} onClick={() => setDayIdx(i)}
+                      style={{ border: `1px solid ${sel ? C.brand : C.border}`, background: sel ? C.brand : C.surface, color: sel ? "#fff" : (isToday ? C.brand : C.ink), cursor: "pointer", fontSize: 12, borderRadius: 8, padding: "5px 9px", fontWeight: sel || isToday ? 600 : 400, minWidth: 38 }}>
+                      {WEEKDAYS[(dd.getDay() + 6) % 7]}
+                    </button>
+                  );
+                })}
+              </div>
+              {renderDay(d)}
+            </div>
+          );
+        }
+
+        return <div style={S.weekRow}>{days.map(renderDay)}</div>;
+      })()}
       <Legend />
     </div>
   );

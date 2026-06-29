@@ -517,6 +517,7 @@ export default function App() {
           irrigation={irrigation}
           saveIrrigation={saveIrrigation}
           canEditIrrigation={canEditIrrigation}
+          importBookings={importBookings}
         />
       )}
 
@@ -1269,13 +1270,22 @@ const ADMIN_MENU = [
 ];
 const ADMIN_LABELS = ADMIN_MENU.reduce((acc, g) => { g.items.forEach(([k, l]) => { acc[k] = l; }); return acc; }, {});
 
-function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, canEditIrrigation }) {
+function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, canEditIrrigation, importBookings }) {
   const [tab, setTab] = useState("belegung");
   const [menuOpen, setMenuOpen] = useState(false);
+  // Menü dynamisch: für Admins kommt die Gruppe "Vorstand" mit Vollzugriff dazu.
+  const menu = isVorstand
+    ? [...ADMIN_MENU, { group: "Vorstand", items: [
+        ["v_nutzer", "Nutzerverwaltung"],
+        ["v_kalender", "Spielplan-Kalender"],
+        ["v_maehplan", "Mähplan-Schalter"],
+      ] }]
+    : ADMIN_MENU;
+  const labels = menu.reduce((acc, g) => { g.items.forEach(([k, l]) => { acc[k] = l; }); return acc; }, {});
   // Welche Menügruppe ist aufgeklappt? Standard: die Gruppe des aktiven Tabs.
   const groupOfTab = (t) => {
-    const g = ADMIN_MENU.find((grp) => grp.items.some(([k]) => k === t));
-    return g ? g.group : ADMIN_MENU[0].group;
+    const g = menu.find((grp) => grp.items.some(([k]) => k === t));
+    return g ? g.group : menu[0].group;
   };
   const [openGroup, setOpenGroup] = useState(groupOfTab("belegung"));
   const pending = bookings.filter((b) => b.status === "beantragt" && b.date >= dayKey(new Date())).length;
@@ -1302,7 +1312,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
         <button
           onClick={openMenu}
           style={{ ...S.navBtn, display: "flex", alignItems: "center", gap: 8, fontWeight: 500, width: "100%", justifyContent: "space-between" }}>
-          <span>☰ {ADMIN_LABELS[tab] || "Menü"}</span>
+          <span>☰ {labels[tab] || "Menü"}</span>
           <span style={{ color: C.textSec, fontSize: 12 }}>{menuOpen ? "▲" : "▼"}</span>
         </button>
         {menuOpen && (
@@ -1310,7 +1320,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
             {/* Klick außerhalb schließt das Menü */}
             <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
             <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 8px 28px rgba(0,0,0,0.16)", padding: 8, maxHeight: 380, overflowY: "auto" }}>
-              {ADMIN_MENU.map((grp) => {
+              {menu.map((grp) => {
                 const expanded = openGroup === grp.group;
                 // Anzahl ungelesener Badges in dieser Gruppe (für zugeklappte Anzeige)
                 const groupBadge = grp.items.reduce((sum, [k]) => sum + (badgeFor(k) || 0), 0);
@@ -1354,6 +1364,15 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       {tab === "trainingstage" && <TrainDayApproval bookings={bookings} setBookingStatus={setBookingStatus} approveSeries={approveSeries} moveBooking={moveBooking} removeBooking={removeBooking} removeSeries={removeSeries} addMessage={addMessage} />}
       {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} users={users} addMessage={addMessage} />}
       {tab === "beregnung" && <IrrigationPanel irrigation={irrigation} saveIrrigation={saveIrrigation} canEdit={canEditIrrigation} bookings={bookings} />}
+      {tab === "v_nutzer" && isVorstand && (
+        <UserManager users={users} saveUser={saveUser} setUserRole={setUserRole} setUserTeams={setUserTeams} setUserRights={setUserRights} removeUser={removeUser} isVorstand={isVorstand} changePin={changePin} />
+      )}
+      {tab === "v_kalender" && isVorstand && (
+        <CalendarImport irrigation={irrigation} saveIrrigation={saveIrrigation} canEdit={isVorstand} importBookings={importBookings} bookings={bookings} />
+      )}
+      {tab === "v_maehplan" && isVorstand && (
+        <MaehplanToggle irrigation={irrigation} saveIrrigation={saveIrrigation} />
+      )}
     </div>
   );
 }

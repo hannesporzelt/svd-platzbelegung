@@ -354,7 +354,7 @@ export default function App() {
   const ready = bookingsReady && locksReady && messagesReady && notesReady && authReady;
   if (!user || !ready)
     return (
-      <div style={S.shell}>
+      <div className="app-shell" style={S.shell}>
         <div style={{ padding: "3rem", textAlign: "center", color: C.textSec }}>
           Verbinde mit dem Belegungsplan…
         </div>
@@ -362,7 +362,7 @@ export default function App() {
     );
 
   return (
-    <div style={S.shell}>
+    <div className="app-shell" style={S.shell}>
       {moveTarget && <MoveDialogOverlay entry={moveTarget} onCancel={() => setMoveTarget(null)} onSave={doMovePlan} />}
       {showLogin && (
         <LoginOverlay
@@ -815,16 +815,17 @@ const ovl = {
 
 /* ---------------- Wochennavigation ---------------- */
 function WeekNav({ weekStart, setWeekStart }) {
+  const isMobile = useIsMobile();
   return (
     <div style={S.weekNav}>
-      <button style={S.navBtn} onClick={() => setWeekStart(addDays(weekStart, -7))}>‹ Vorige Woche</button>
+      <button style={S.navBtn} onClick={() => setWeekStart(addDays(weekStart, -7))}>{isMobile ? "‹" : "‹ Vorige Woche"}</button>
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 13, color: C.textSec }}>KW {isoWeek(weekStart)}</div>
         <div style={{ fontWeight: 500, fontSize: 16 }}>{fmtRange(weekStart)}</div>
       </div>
       <div style={{ display: "flex", gap: 8 }}>
         <button style={S.navBtn} onClick={() => setWeekStart(mondayOf(new Date()))}>Heute</button>
-        <button style={S.navBtn} onClick={() => setWeekStart(addDays(weekStart, 7))}>Nächste Woche ›</button>
+        <button style={S.navBtn} onClick={() => setWeekStart(addDays(weekStart, 7))}>{isMobile ? "›" : "Nächste Woche ›"}</button>
       </div>
     </div>
   );

@@ -74,3 +74,10 @@ body, .print-area, input, select, textarea, button { transition: background-colo
   --c-note-bg: #3a3320;
   --c-soft: #202327;
 }
+
+/* Mobile: weniger Rand, damit mehr Platz für Inhalt bleibt */
+@media (max-width: 720px) {
+  .app-shell {
+    padding: 10px !important;
+  }
+}

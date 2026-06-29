@@ -1,4 +1,7 @@
 {
+  "crons": [
+    { "path": "/api/cron-import", "schedule": "0 4 * * *" }
+  ],
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],

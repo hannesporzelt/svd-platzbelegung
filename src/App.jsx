@@ -580,14 +580,11 @@ export default function App() {
 /* ---------------- Header ---------------- */
 function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf, onWeekPdf, theme, setTheme, maehplanOn }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  // Welche Teams darf der Trainer im Dropdown wählen?
   const teamOptions = (role === "trainer" && myTeams.length > 0)
     ? TEAMS.filter((t) => myTeams.includes(t.id))
     : TEAMS;
-  // Rollenanzeige rechts oben
   const roleLabel = view === "maehplan" ? "Mähplan" : view === "vorstand" ? "Vorstand" : view === "admin" ? "Platzwart" : view === "trainer" ? "Trainer" : "Betrachter";
 
-  // "Vorstand" nur für Admins; "Mähplan" für Platzwart-Ebene, wenn aktiviert.
   const ROLES = [
     ["viewer", "Betrachter"], ["trainer", "Trainer"], ["admin", "Platzwart"],
     ...(isVorstand ? [["vorstand", "Vorstand"]] : []),
@@ -598,7 +595,6 @@ function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, r
   return (
     <header style={S.header}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        {/* Hauptmenü-Knopf */}
         <div style={{ position: "relative" }} className="no-print">
           <button onClick={() => setMenuOpen((o) => !o)} aria-label="Menü"
             style={{ ...S.navBtn, fontSize: 18, lineHeight: 1, padding: "8px 12px", position: "relative" }}>
@@ -676,7 +672,6 @@ function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, r
         </div>
       </div>
 
-      {/* Rechts: aktuelle Rolle + Anmelden/Abmelden (immer sichtbar) */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }} className="no-print">
         <span style={{ fontSize: 12, color: C.textSec }}>{roleLabel}</span>
         {isLoggedIn ? (
@@ -691,7 +686,7 @@ function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, r
 
 /* ---------------- Login-Maske (E-Mail/Passwort) ---------------- */
 function LoginOverlay({ onClose, loginEmail, resetPassword, registerEmail, loginAdminPin }) {
-  const [mode, setMode] = useState("login"); // login | register
+  const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
@@ -835,8 +830,6 @@ function WeekNav({ weekStart, setWeekStart }) {
 /* ---------------- Wochenraster ---------------- */
 function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove, notes, setNote, teamFilter, setTeamFilter, myTeams, irrigation }) {
   const isMobile = useIsMobile();
-  // Auf dem Handy: nur EIN Tag sichtbar, durch die Woche blättern.
-  // Standard: heutiger Tag, falls in dieser Woche, sonst erster Tag.
   const todayIdx = days.findIndex((d) => dayKey(d) === dayKey(new Date()));
   const [dayIdx, setDayIdx] = useState(todayIdx >= 0 ? todayIdx : 0);
   React.useEffect(() => {
@@ -844,12 +837,10 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
     setDayIdx(t >= 0 ? t : 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days[0] && dayKey(days[0])]);
-  // Beregnungstage je Platz (für Tropfen-Markierung im Plan)
   const irrDays = {
     p1: (irrigation && irrigation.p1 && irrigation.p1.days) || [],
     p2: (irrigation && irrigation.p2 && irrigation.p2.days) || [],
   };
-  // Filter-Funktion: entscheidet, ob ein Eintrag angezeigt wird
   const matchesFilter = (e) => {
     if (!teamFilter || teamFilter === "all") return true;
     if (teamFilter === "mine") return myTeams && myTeams.includes(e.team);
@@ -868,7 +859,6 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
           ))}
         </div>
       </div>
-      {/* Mannschafts-Filter */}
       <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, color: C.textSec }}>Mannschaft:</span>
         <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} style={{ ...S.select, width: "auto", minWidth: 160 }}>
@@ -957,7 +947,6 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
           const d = days[Math.min(dayIdx, days.length - 1)];
           return (
             <div>
-              {/* Blätter-Leiste fürs Handy */}
               <div className="no-print" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
                 <button onClick={() => setDayIdx((i) => Math.max(0, i - 1))} disabled={dayIdx <= 0}
                   style={{ ...S.navBtn, opacity: dayIdx <= 0 ? 0.4 : 1, padding: "8px 14px" }}>← Vortag</button>
@@ -967,7 +956,6 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
                 <button onClick={() => setDayIdx((i) => Math.min(days.length - 1, i + 1))} disabled={dayIdx >= days.length - 1}
                   style={{ ...S.navBtn, opacity: dayIdx >= days.length - 1 ? 0.4 : 1, padding: "8px 14px" }}>Folgetag →</button>
               </div>
-              {/* Schnellwahl der Wochentage */}
               <div className="no-print" style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap", justifyContent: "center" }}>
                 {days.map((dd, i) => {
                   const sel = i === dayIdx;
@@ -992,7 +980,6 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
   );
 }
 
-// Tagesnotiz-Anzeige (gelb hinterlegt)
 function NoteChip({ text }) {
   return (
     <div style={{ background: "#fff8e1", border: "1px solid #f0e0a8", color: "#7a5d00", fontSize: 11, borderRadius: 6, padding: "4px 6px", marginBottom: 6, lineHeight: 1.35 }}
@@ -1016,7 +1003,7 @@ function Chip({ entry, conflict, isAdmin, removeBooking, onMove }) {
     }
   };
   const teamColor = t ? t.color : "#888888";
-  const tint = hexToRgba(teamColor, 0.12); // zarte Tönung in Mannschaftsfarbe
+  const tint = hexToRgba(teamColor, 0.12);
   return (
     <div style={{ ...S.chip, background: tint, borderLeft: `4px solid ${teamColor}`, ...(conflict ? { background: "#fbeaea", borderColor: "#e7a5a5" } : {}) }}
       title={conflict ? "Doppelbelegung – gleiche Zone und Zeit" : undefined}>
@@ -1093,8 +1080,6 @@ function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockFor
   const date = days[Math.min(dayIdx, 6)] || days[0];
   const entries = entriesForDay(date).filter((e) => e.field === activeField);
   const lock = lockForDayField(date, activeField);
-  // Eine Teilfläche (z. B. v1) zeigt jeden Eintrag, dessen Zone sie abdeckt –
-  // also auch eine Hälften- oder Ganzplatz-Belegung.
   const zoneOccupants = (zoneId) => entries.filter((e) => zoneCovers(e.zone, zoneId));
 
   return (
@@ -1143,11 +1128,9 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
   const shiftMonth = (delta) => { const d = new Date(year, month + delta, 1); setMonthAnchor(d); };
   const toThisMonth = () => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); setMonthAnchor(d); };
 
-  // Raster: erste Zelle = Montag der Woche, in der der Monatsanfang liegt
   const first = new Date(year, month, 1);
   const gridStart = mondayOf(first);
-  const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i)); // 6 Wochen
-  // letzte Zeile weglassen, wenn komplett im Folgemonat
+  const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
   const usedRows = cells.some((d, i) => i >= 35 && d.getMonth() === month) ? 6 : 5;
   const shownCells = cells.slice(0, usedRows * 7);
 
@@ -1247,7 +1230,6 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
 }
 
 /* ---------------- Admin ---------------- */
-// Menügruppen für den Platzwart-Bereich. Jede Gruppe bündelt zusammengehörige Funktionen.
 const ADMIN_MENU = [
   { group: "Eintragen", items: [
     ["belegung", "Belegung eintragen"],
@@ -1273,7 +1255,6 @@ const ADMIN_LABELS = ADMIN_MENU.reduce((acc, g) => { g.items.forEach(([k, l]) =>
 function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, canEditIrrigation, importBookings }) {
   const [tab, setTab] = useState("belegung");
   const [menuOpen, setMenuOpen] = useState(false);
-  // Menü dynamisch: für Admins kommt die Gruppe "Vorstand" mit Vollzugriff dazu.
   const menu = isVorstand
     ? [...ADMIN_MENU, { group: "Vorstand", items: [
         ["v_nutzer", "Nutzerverwaltung"],
@@ -1282,7 +1263,6 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       ] }]
     : ADMIN_MENU;
   const labels = menu.reduce((acc, g) => { g.items.forEach(([k, l]) => { acc[k] = l; }); return acc; }, {});
-  // Welche Menügruppe ist aufgeklappt? Standard: die Gruppe des aktiven Tabs.
   const groupOfTab = (t) => {
     const g = menu.find((grp) => grp.items.some(([k]) => k === t));
     return g ? g.group : menu[0].group;
@@ -1290,7 +1270,6 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
   const [openGroup, setOpenGroup] = useState(groupOfTab("belegung"));
   const pending = bookings.filter((b) => b.status === "beantragt" && b.date >= dayKey(new Date())).length;
   const openMsg = messages.filter((m) => !m.done && m.dir !== "out").length;
-  // Anzahl Tage mit Konflikten ab heute (für Badge im Menü)
   const conflictDayCount = (() => {
     const today = dayKey(new Date());
     const byDay = {};
@@ -1299,7 +1278,6 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
     Object.values(byDay).forEach((list) => { if (conflictIdsForEntries(list).size > 0) n++; });
     return n;
   })();
-  // Badge-Zahl je Menüpunkt
   const badgeFor = (k) => k === "trainingstage" ? pending : k === "nachrichten" ? openMsg : k === "konflikte" ? conflictDayCount : 0;
 
   const choose = (k) => { setTab(k); setOpenGroup(groupOfTab(k)); setMenuOpen(false); };
@@ -1307,7 +1285,6 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
 
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
-      {/* Klappmenü-Kopf: zeigt aktuellen Bereich, öffnet die Gruppenliste */}
       <div style={{ position: "relative", marginBottom: 14 }}>
         <button
           onClick={openMenu}
@@ -1317,12 +1294,10 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
         </button>
         {menuOpen && (
           <>
-            {/* Klick außerhalb schließt das Menü */}
             <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
             <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 8px 28px rgba(0,0,0,0.16)", padding: 8, maxHeight: 380, overflowY: "auto" }}>
               {menu.map((grp) => {
                 const expanded = openGroup === grp.group;
-                // Anzahl ungelesener Badges in dieser Gruppe (für zugeklappte Anzeige)
                 const groupBadge = grp.items.reduce((sum, [k]) => sum + (badgeFor(k) || 0), 0);
                 return (
                   <div key={grp.group} style={{ marginBottom: 4 }}>
@@ -1378,20 +1353,17 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
 }
 
 /* ---------------- Konfliktübersicht ---------------- */
-// Listet alle echten Doppelbelegungen ab heute, nach Tag gruppiert.
 function ConflictOverview({ bookings, removeBooking, onMove }) {
   const today = dayKey(new Date());
   const fmtDate = (dk) => {
     const d = new Date(dk + "T12:00");
     return `${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
   };
-  // Belegungen ab heute nach Tag gruppieren (Anträge ausgenommen)
   const byDay = {};
   bookings
     .filter((b) => b.status !== "beantragt" && b.date >= today)
     .forEach((b) => { (byDay[b.date] ||= []).push(b); });
 
-  // Pro Tag die konkreten Konfliktpaare bestimmen
   const days = Object.keys(byDay).sort();
   const conflictDays = [];
   days.forEach((dk) => {
@@ -1442,8 +1414,6 @@ function ConflictOverview({ bookings, removeBooking, onMove }) {
 }
 
 /* ---------------- Statistik ---------------- */
-// Wertet die vorhandenen Belegungen aus: Stunden je Platz und je Mannschaft,
-// im wählbaren Zeitraum. Keine neue Datenbank nötig.
 function StatsPanel({ bookings }) {
   const today = new Date();
   const iso = (d) => dayKey(d);
@@ -1455,10 +1425,8 @@ function StatsPanel({ bookings }) {
 
   const hoursOf = (b) => Math.max(0, (toMin(b.end) - toMin(b.start))) / 60;
 
-  // je Platz
   const perField = {};
   FIELDS.forEach((f) => { perField[f.id] = 0; });
-  // je Mannschaft
   const perTeam = {};
   let totalH = 0, totalCount = list.length;
   list.forEach((b) => {
@@ -1542,21 +1510,19 @@ function Field({ label, children }) {
   );
 }
 
-// Lesbare Zonen-Bezeichnung für Listen
 function zoneText(field, zone) {
   const f = fieldById(field);
   const z = f?.zones.find((x) => x.id === zone);
   return z ? z.label : zone;
 }
 
-// Platzwart: alle freigegebenen Belegungen, filterbar nach Mannschaft, einzeln oder als Serie löschbar
 function BookingManager({ bookings, removeBooking, removeSeries, onMove }) {
   const [team, setTeam] = useState("alle");
   const todayKey = dayKey(new Date());
   const list = bookings
-    .filter((b) => b.status !== "beantragt") // Anträge stehen unter "Trainingstage"
+    .filter((b) => b.status !== "beantragt")
     .filter((b) => team === "alle" || b.team === team)
-    .filter((b) => b.date >= todayKey) // ab heute
+    .filter((b) => b.date >= todayKey)
     .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
 
   const fmtDate = (dk) => {
@@ -1595,9 +1561,7 @@ function BookingManager({ bookings, removeBooking, removeSeries, onMove }) {
   );
 }
 
-// Platzwart: Nachrichten von Trainern
 function MessageInbox({ messages, setMessageDone, removeMessage, users, addMessage }) {
-  // Inbox zeigt nur eingehende Nachrichten (Trainer -> Platzwart)
   const userById = {};
   (users || []).forEach((u) => { userById[u.id] = u; });
   const senderLabel = (m) => {
@@ -1612,11 +1576,9 @@ function MessageInbox({ messages, setMessageDone, removeMessage, users, addMessa
   const done = sorted.filter((m) => m.done);
   const fmtTs = (ts) => ts ? new Date(ts).toLocaleString("de-DE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
-  // ----- Senden an Trainer (an alle / Mannschaft / Person) -----
-  const [target, setTarget] = useState("all");       // "all" | team:<id> | user:<uid>
+  const [target, setTarget] = useState("all");
   const [text, setText] = useState("");
   const [sent, setSent] = useState(false);
-  // Nur echte Trainer-Konten als Einzelempfänger anbieten
   const trainerUsers = (users || []).filter((u) => u.role === "trainer");
   const send = () => {
     const t = text.trim();
@@ -1698,7 +1660,6 @@ const IRR_DEFAary = {
 };
 
 function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
-  // lokale Entwürfe je Platz (erst speichern schreibt nach Firestore)
   const initial = (fid) => {
     const fromDb = irrigation && irrigation[fid];
     return fromDb ? { ...IRR_DEFAary[fid], ...fromDb } : { ...IRR_DEFAary[fid] };
@@ -1706,7 +1667,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
   const [draft, setDraft] = useState({ p1: initial("p1"), p2: initial("p2") });
   const [savedMsg, setSavedMsg] = useState(null);
 
-  // Auto-Konfiguration (auslösende Mannschaften, Frist, Tor-Regner je Platz)
   const autoFromDb = (irrigation && irrigation._auto) || {};
   const [auto, setAuto] = useState({
     triggerTeams: autoFromDb.triggerTeams || [],
@@ -1729,8 +1689,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [irrigation?._auto?.updatedTs]);
 
-  // Rohtext der Tor-Regner-Felder, damit man beim Tippen Kommas setzen kann.
-  // Erst beim Speichern wird in Zahlen-Arrays umgewandelt.
   const [torP1Text, setTorP1Text] = useState((autoFromDb.torP1 || [3, 12, 7, 8]).join(", "));
   const [torP2Text, setTorP2Text] = useState((autoFromDb.torP2 || []).join(", "));
   React.useEffect(() => {
@@ -1763,7 +1721,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
     }
   };
 
-  // Kommende Heimspiele mit Kurzberegnung berechnen
   const today = dayKey(new Date());
   const matchPlan = computeMatchIrrigation(
     bookings, auto.triggerTeams,
@@ -1774,8 +1731,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
     today
   );
 
-  // Wenn Firestore-Daten (nach)geladen werden, Entwurf aktualisieren – aber nur,
-  // solange der Nutzer nicht gerade tippt (einfacher Ansatz: beim ersten Laden).
   React.useEffect(() => {
     setDraft({ p1: initial("p1"), p2: initial("p2") });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1792,18 +1747,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
     upd(fid, { starts: s });
   };
 
-  // Fenster beider Plätze für die Pumpen-Prüfung (gemeinsame Pumpe!)
-  const allWindows = [];
-  ["p1", "p2"].forEach((fid) => {
-    buildIrrigationWindows({
-      fieldId: fid,
-      starts: (draft[fid].starts || []).filter(Boolean),
-      stations: draft[fid].stations || 12,
-      runMin: draft[fid].runMin || 15,
-      gapSec: draft[fid].gapSec || 0,
-    }).forEach((w) => allWindows.push(w));
-  });
-  // Tagesabhängig prüfen: nur Plätze, die am selben Wochentag laufen, teilen die Pumpe.
   const overlapsByDay = {};
   IRR_WEEKDAYS.forEach((wd) => {
     const todays = [];
@@ -1824,7 +1767,7 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
   const hasOverlap = Object.keys(overlapsByDay).length > 0;
 
   const save = async (fid) => {
-    if (hasOverlap) return; // bei Pumpen-Konflikt nicht speichern
+    if (hasOverlap) return;
     try {
       await saveIrrigation(fid, draft[fid]);
       setSavedMsg(`${IRR_FIELDS.find((f) => f.id === fid).name} gespeichert.`);
@@ -1869,13 +1812,12 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
               <span style={{ fontSize: 12, color: C.textSec }}>Ende letzte Station: <b>{lastEnd}</b></span>
             </div>
 
-            {/* Wochentage */}
             <div style={{ margin: "8px 0" }}>
               <div style={{ fontSize: 12, color: C.textSec, marginBottom: 4 }}>Bewässerungstage</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {IRR_WEEKDAYS.map((wd) => {
                   const on = (d.days || []).includes(wd);
-                  const fieldColor = f.id === "p1" ? "#0f6e3e" : "#1d6fb8"; // Platz 1 grün, Platz 2 blau
+                  const fieldColor = f.id === "p1" ? "#0f6e3e" : "#1d6fb8";
                   const activeStyle = on
                     ? { background: fieldColor, color: "#fff", borderColor: fieldColor, fontWeight: 600 }
                     : {};
@@ -1889,7 +1831,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
               </div>
             </div>
 
-            {/* Parameter */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 12, margin: "8px 0" }}>
               <label style={{ fontSize: 12, color: C.textSec }}>
                 Laufzeit/Station (Min)
@@ -1905,7 +1846,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
               </label>
             </div>
 
-            {/* Startzeiten der Durchgänge */}
             <div style={{ margin: "8px 0" }}>
               <div style={{ fontSize: 12, color: C.textSec, marginBottom: 4 }}>Startzeiten der Durchgänge</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -1917,7 +1857,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
               </div>
             </div>
 
-            {/* Stationszeiten-Vorschau */}
             <details style={{ marginTop: 6 }}>
               <summary style={{ cursor: "pointer", fontSize: 13, color: C.brand }}>Stationszeiten anzeigen</summary>
               <div style={{ marginTop: 6, fontSize: 12, color: C.textSec, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 4 }}>
@@ -1940,7 +1879,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
         );
       })}
 
-      {/* Heimspiel-Automatik */}
       <div style={{ ...S.card, marginTop: 14, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
         <h3 style={{ margin: "0 0 6px" }}>⚽ Heimspiel-Automatik</h3>
         <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>
@@ -1990,7 +1928,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
 
         {canEdit && <button style={S.okBtn} onClick={saveAuto}>Heimspiel-Einstellungen speichern</button>}
 
-        {/* Liste kommender Heimspiele */}
         <div style={{ marginTop: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Kommende Heimspiele mit Kurzberegnung</div>
           {matchPlan.length === 0 && (
@@ -2022,7 +1959,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
         </div>
       </div>
 
-      {/* Kurzprogramm-Rechner Heimspiel */}
       <KickoffCalc />
     </div>
   );
@@ -2033,7 +1969,7 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
   const [cals, setCals] = useState(Array.isArray(saved.list) ? saved.list : []);
   const [newUrl, setNewUrl] = useState("");
   const [newTeam, setNewTeam] = useState(TEAMS[0]?.id || "");
-  const [games, setGames] = useState([]);     // erkannte Heimspiele (mit team)
+  const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -2046,9 +1982,6 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [irrigation?._calendars?.updatedTs]);
 
-  // Automatischer Abruf + Eintrag beim Öffnen des Vorstand-Bereichs.
-  // Läuft nur einmal pro Sitzung, nur wenn Kalender hinterlegt sind und
-  // der Nutzer eintragen darf. Nutzt den vorhandenen Platz-Schutz.
   React.useEffect(() => {
     if (autoRanRef.current) return;
     if (!canEdit || !importBookings) return;
@@ -2149,7 +2082,6 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
         </div>
       )}
 
-      {/* vorhandene Kalender */}
       {cals.length > 0 && (
         <div style={{ marginBottom: 8 }}>
           {cals.map((c, i) => (
@@ -2163,7 +2095,6 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
         </div>
       )}
 
-      {/* neuen Kalender hinzufügen */}
       {canEdit && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-end", marginBottom: 8 }}>
           <label style={{ fontSize: 12, color: C.textSec, flex: "1 1 240px" }}>BFV-Kalender-Link
@@ -2189,7 +2120,6 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
       )}
       {msg && <div style={{ fontSize: 12, color: C.textSec, marginTop: 6 }}>{msg}</div>}
 
-      {/* erkannte Heimspiele */}
       {games.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
@@ -2224,12 +2154,10 @@ function KickoffCalc() {
   const [runMin, setRunMin] = useState(5);
   const [gapSec, setGapSec] = useState(5);
   const [endOffset, setEndOffset] = useState(30);
-  // Kurzprogramm Platz 1: 12 Stationen, Tor-Regner (3,12,7,8) zuletzt -> als Prog. C
   const totalDur = passDurationSec(12, runMin, gapSec);
-  const torDur = passDurationSec(4, runMin, gapSec);   // 4 Tor-Stationen
-  const restDur = passDurationSec(8, runMin, gapSec);  // 8 übrige
-  const cCalc = kickoffToStart(kickoff, torDur, endOffset);   // Prog. C endet 30 Min vor Anpfiff
-  // Prog. B endet, wenn Prog. C startet -> von dort restDur zurückrechnen.
+  const torDur = passDurationSec(4, runMin, gapSec);
+  const restDur = passDurationSec(8, runMin, gapSec);
+  const cCalc = kickoffToStart(kickoff, torDur, endOffset);
   const bCalc = kickoffToStart(cCalc.start, restDur, 0);
 
   return (
@@ -2427,7 +2355,6 @@ function UserManager({ users, saveUser, setUserRole, setUserTeams, setUserRights
   const toggleTeam = (tid) => setDraftTeams((d) => d.includes(tid) ? d.filter((x) => x !== tid) : [...d, tid]);
   const saveTeams = (u) => { setUserTeams(u.id, draftTeams); setEditId(null); };
 
-  // Variante 2: fehlt rights komplett -> Altbestand -> gilt als "alles an".
   const rightOn = (u, key) => !u.rights || typeof u.rights !== "object" ? true : u.rights[key] === true;
   const toggleRight = (u, key) => {
     const base = (u.rights && typeof u.rights === "object") ? u.rights : { irrigation: true, locks: true, messages: true, notes: true };
@@ -2468,7 +2395,6 @@ function UserManager({ users, saveUser, setUserRole, setUserTeams, setUserRights
               <span style={{ fontSize: 13, color: C.textSec }}>{u.email || "(keine E-Mail)"}</span>
             </div>
 
-            {/* Rollenvergabe – nur Admin */}
             {isVorstand && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 <span style={{ fontSize: 12, color: C.textSec, alignSelf: "center" }}>Rolle:</span>
@@ -2481,7 +2407,6 @@ function UserManager({ users, saveUser, setUserRole, setUserTeams, setUserRights
               </div>
             )}
 
-            {/* Rechte-Schalter – nur für Platzwarte, nur Admin sieht/ändert sie */}
             {isVorstand && u.role === "platzwart" && (
               <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px" }}>
                 <div style={{ fontSize: 12, color: C.textSec, marginBottom: 6 }}>Rechte dieses Platzwarts:</div>
@@ -2543,28 +2468,25 @@ function UserManager({ users, saveUser, setUserRole, setUserTeams, setUserRights
   );
 }
 
-
-
 function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeries, removeBooking, removeSeries, kind }) {
-  const [mode, setMode] = useState("single"); // single | series
+  const [mode, setMode] = useState("single");
   const [date, setDate] = useState(dayKey(days[0]));
-  const [weekday, setWeekday] = useState(1); // 0=Mo..6=So, Standard Di
+  const [weekday, setWeekday] = useState(1);
   const [seriesFrom, setSeriesFrom] = useState(dayKey(days[0]));
-  const [seriesTo, setSeriesTo] = useState(dayKey(addDays(days[0], 84))); // ~12 Wochen
+  const [seriesTo, setSeriesTo] = useState(dayKey(addDays(days[0], 84)));
   const [team, setTeam] = useState("u15");
   const matchLike = kind === "match" || kind === "turnier";
   const [field, setField] = useState(matchLike ? "p1" : "p2");
   const [zone, setZone] = useState("v1");
   const [start, setStart] = useState(matchLike ? "15:00" : "17:00");
   const [end, setEnd] = useState(matchLike ? "17:00" : "18:30");
-  const [opponent, setOpponent] = useState(""); // Gegner bei Heimspielen
-  const [warmupField, setWarmupField] = useState(""); // "" = auf dem Spielplatz
+  const [opponent, setOpponent] = useState("");
+  const [warmupField, setWarmupField] = useState("");
 
   const zones = fieldById(field).zones;
   const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
   const timeInvalid = !(start < end);
 
-  // Konfliktvorschau nur im Einzelmodus (Serie prüft beim Speichern jeden Termin)
   const allDayEntries = [
     ...autoTrainingForDay(new Date(date + "T12:00")),
     ...((bookingsByDay[date] || []).filter((b) => b.status !== "beantragt")),
@@ -2579,16 +2501,13 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
     const entry = { date, field, zone: safeZone, team, start, end, kind };
     if (kind === "match" && opponent.trim()) entry.opponent = opponent.trim();
     if (kind === "match" && warmupField && warmupField !== field) entry.warmupField = warmupField;
-    // Gemeinsame Gruppe für Spiel + ausgelagerten Aufwärm-Block (zum gemeinsamen Löschen)
     const grp = (kind === "match" && warmupField && warmupField !== field)
       ? `mg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` : null;
     if (grp) entry.matchGroup = grp;
 
-    // Aufwärm-Block (nur wenn auf anderen Platz ausgelagert)
     const warmup = warmupBlockFor({ ...entry, id: "__neu__" });
     if (warmup && grp) warmup.matchGroup = grp;
 
-    // Konflikte für Spiel UND Aufwärm-Block prüfen
     const conflicts = findConflicts({ ...entry, id: "__neu__" }, allDayEntries);
     let warmupConflicts = [];
     if (warmup) {
@@ -2614,7 +2533,6 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
       window.alert("Kein Termin im gewählten Zeitraum. Bitte Datum und Wochentag prüfen.");
       return;
     }
-    // Jeden Termin auf Konflikte prüfen
     const conflictDays = [];
     seriesDates.forEach((dk) => {
       const existing = [...autoTrainingForDay(new Date(dk + "T12:00")), ...((bookingsByDay[dk] || []).filter((b) => b.status !== "beantragt"))];
@@ -2636,13 +2554,12 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
   const savingRef = useRef(false);
   const add = () => {
     if (timeInvalid) return;
-    if (savingRef.current) return; // verhindert doppeltes Anlegen bei Doppelklick / StrictMode
+    if (savingRef.current) return;
     savingRef.current = true;
     try {
       if (mode === "series") addSeries();
       else addSingle();
     } finally {
-      // kurze Sperre, dann wieder freigeben
       setTimeout(() => { savingRef.current = false; }, 800);
     }
   };
@@ -2706,7 +2623,6 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
         const wf = warmupField && warmupField !== field ? warmupField : null;
         const wb = wf ? warmupBlockFor({ kind, date, field, start, end, team, warmupField: wf }) : null;
         const spielEnd = effectiveSpan({ kind, start, end, warmupField: wf, field }).end;
-        // Prüfen, ob der Aufwärm-Block (oder das Aufwärmen auf dem Spielplatz) kollidiert
         const dayEntriesAll = [
           ...autoTrainingForDay(new Date(date + "T12:00")),
           ...((bookingsByDay[date] || []).filter((b) => b.status !== "beantragt")),
@@ -2715,11 +2631,10 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
         if (wb) {
           warmupClash = findConflicts({ ...wb, id: "__wmcheck__" }, dayEntriesAll);
         }
-        // Falls Aufwärmplatz belegt: freien Platz vorschlagen
         let suggestion = null;
         if (warmupClash.length > 0) {
           for (const f of FIELDS) {
-            if (f.id === field) continue; // nicht der Spielplatz
+            if (f.id === field) continue;
             const probe = warmupBlockFor({ kind, date, field, start, end, team, warmupField: f.id });
             if (probe && findConflicts({ ...probe, id: "__probe__" }, dayEntriesAll).length === 0) {
               suggestion = f; break;
@@ -2814,17 +2729,15 @@ function LockForm({ locks, addLock, removeLock }) {
 }
 
 function TrainDayApproval({ bookings, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, addMessage }) {
-  const [moveTarget, setMoveTarget] = useState(null); // die zu verschiebende Belegung
+  const [moveTarget, setMoveTarget] = useState(null);
   const todayKey = dayKey(new Date());
   const pending = bookings
     .filter((b) => b.status === "beantragt" && b.date >= todayKey)
     .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
-  // Vergangene, nie bearbeitete Anträge (können nur noch entfernt werden)
   const stale = bookings
     .filter((b) => b.status === "beantragt" && b.date < todayKey)
     .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
 
-  // nach Serie gruppieren: Einzeltermine einzeln, Serien zusammengefasst
   const singles = pending.filter((b) => !b.seriesId);
   const seriesMap = {};
   pending.filter((b) => b.seriesId).forEach((b) => { (seriesMap[b.seriesId] ||= []).push(b); });
@@ -3015,26 +2928,152 @@ function MoveDialogOverlay({ entry, onCancel, onSave }) {
   );
 }
 
+/* ---------------- Freie Zeiten finden (Trainer) ---------------- */
+// Rahmenzeiten: Sa/So ab 09:00, sonst ab 15:00; Ende immer 22:00.
+const SLOT_FRAME = { weekendStartH: 9, weekdayStartH: 15, endH: 22 };
+
+// Teilen zwei Zonen desselben Platzes eine atomare Fläche? (nutzt zoneCovers)
+function zonesShareArea(field, zoneA, zoneB) {
+  if (field === "p1") return true;
+  if (zoneA === zoneB) return true;
+  const ATOMIC = { p2: ["v1", "v2", "v3", "v4"], p3: ["h1", "h2"], p1: ["voll"] };
+  const f = fieldById(field);
+  const units = ATOMIC[field] || (f ? f.zones.map((z) => z.id) : []);
+  const ua = units.filter((u) => zoneCovers(zoneA, u));
+  const ub = units.filter((u) => zoneCovers(zoneB, u));
+  return ua.some((u) => ub.includes(u));
+}
+
+function FreeSlotFinder({ bookings }) {
+  const toMin = (t) => { const [h, m] = (t || "0:0").split(":").map(Number); return h * 60 + m; };
+  const minToTime = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  const todayK = dayKey(new Date());
+
+  const [date, setDate] = useState(todayK);
+  const [field, setField] = useState("p2");
+  const [zone, setZone] = useState("p2_voll");
+  const [minLen, setMinLen] = useState(60);
+
+  const zones = fieldById(field).zones;
+  const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
+
+  const frame = (() => {
+    const d = new Date(date + "T12:00");
+    const wd = (d.getDay() + 6) % 7;
+    const startH = (wd === 5 || wd === 6) ? SLOT_FRAME.weekendStartH : SLOT_FRAME.weekdayStartH;
+    return { start: startH * 60, end: SLOT_FRAME.endH * 60 };
+  })();
+
+  const span = (e) => {
+    const s = effectiveSpan(e);
+    return { s: toMin(s.start), e: toMin(s.end) };
+  };
+
+  const gaps = (() => {
+    const blocks = (bookings || [])
+      .filter((b) => b.date === date && b.field === field && b.status !== "beantragt")
+      .filter((b) => zonesShareArea(field, safeZone, b.zone))
+      .map(span)
+      .map((s) => ({ s: Math.max(frame.start, s.s), e: Math.min(frame.end, s.e) }))
+      .filter((s) => s.e > s.s)
+      .sort((a, b) => a.s - b.s);
+    const merged = [];
+    for (const b of blocks) {
+      if (merged.length && b.s <= merged[merged.length - 1].e)
+        merged[merged.length - 1].e = Math.max(merged[merged.length - 1].e, b.e);
+      else merged.push({ ...b });
+    }
+    const out = [];
+    let cur = frame.start;
+    for (const m of merged) {
+      if (m.s > cur) out.push({ start: cur, end: m.s });
+      cur = Math.max(cur, m.e);
+    }
+    if (cur < frame.end) out.push({ start: cur, end: frame.end });
+    return out.filter((g) => g.end - g.start >= minLen);
+  })();
+
+  const d = new Date(date + "T12:00");
+  const wdLong = WEEKDAYS_LONG[(d.getDay() + 6) % 7];
+  const zoneLabel = zones.find((z) => z.id === safeZone)?.label || safeZone;
+
+  return (
+    <div>
+      <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>
+        Finde freie Zeitfenster an einem Tag. Wähle Platz, Bereich und Datum –
+        die Lücken berücksichtigen alle Belegungen, die denselben Platzbereich betreffen
+        (z. B. ist ein Viertel belegt, wenn die ganze Hälfte gebucht ist).
+        Rahmenzeiten: Sa/So ab 09:00, sonst ab 15:00, bis 22:00.
+      </p>
+
+      <div style={S.formGrid}>
+        <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={S.select} /></Field>
+        <Field label="Platz">
+          <select value={field} onChange={(e) => { setField(e.target.value); setZone(fieldById(e.target.value).zones[0].id); }} style={S.select}>
+            {FIELDS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Bereich / Zone">
+          <select value={safeZone} onChange={(e) => setZone(e.target.value)} style={S.select}>
+            {zones.map((z) => <option key={z.id} value={z.id}>{z.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Mindestdauer">
+          <select value={minLen} onChange={(e) => setMinLen(Number(e.target.value))} style={S.select}>
+            <option value={30}>30 Minuten</option>
+            <option value={60}>1 Stunde</option>
+            <option value={90}>1,5 Stunden</option>
+            <option value={120}>2 Stunden</option>
+          </select>
+        </Field>
+      </div>
+
+      <div style={{ ...S.subHead, marginTop: 8 }}>
+        Freie Zeiten am {wdLong}, {d.getDate()}.{d.getMonth() + 1}. · {fieldById(field).name} · {zoneLabel}
+      </div>
+
+      {gaps.length === 0 && (
+        <div style={{ ...S.warnBanner, background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", display: "block" }}>
+          Keine freien Fenster von mindestens {minLen} Minuten an diesem Tag.
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {gaps.map((g, i) => {
+          const len = g.end - g.start;
+          const h = Math.floor(len / 60), m = len % 60;
+          const lenTxt = (h ? `${h} Std ` : "") + (m ? `${m} Min` : (h ? "" : "0 Min"));
+          return (
+            <div key={i} style={{ ...S.listRow, borderLeft: `4px solid ${C.ok}`, paddingLeft: 10 }}>
+              <span style={{ fontWeight: 600, fontSize: 15 }}>{minToTime(g.start)} – {minToTime(g.end)}</span>
+              <span style={{ fontSize: 13, color: C.textSec }}>frei · {lenTxt.trim()}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Trainer ---------------- */
 function TrainerPanel({ trainerTeam, bookings, bookingsByDay, addBooking, addBookingSeries, entriesForDay, addMessage, messages, myUid, myTeams }) {
   const [tab, setTab] = useState("eintragen");
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
       <div style={S.adminTabs}>
-        {[["eintragen", "Trainingstag eintragen"], ["nachricht", "Nachricht an Platzwart"]].map(([k, l]) => (
+        {[["eintragen", "Trainingstag eintragen"], ["frei", "Freie Zeiten"], ["nachricht", "Nachricht an Platzwart"]].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...S.tab, ...(tab === k ? S.tabActive : {}) }}>{l}</button>
         ))}
       </div>
       {tab === "eintragen" && <TrainerBookingForm trainerTeam={trainerTeam} bookings={bookings} bookingsByDay={bookingsByDay} addBooking={addBooking} addBookingSeries={addBookingSeries} entriesForDay={entriesForDay} />}
+      {tab === "frei" && <FreeSlotFinder bookings={bookings} />}
       {tab === "nachricht" && <MessageForm trainerTeam={trainerTeam} addMessage={addMessage} messages={messages} myUid={myUid} myTeams={myTeams} />}
     </div>
   );
 }
 
-// Trainer trägt Trainingstage direkt ein (Einzeltermin mit Datum oder Serie).
-// Erscheint sofort im Kalender; der Platzwart kann später löschen.
 function TrainerBookingForm({ trainerTeam, bookings, bookingsByDay, addBooking, addBookingSeries, entriesForDay }) {
-  const [mode, setMode] = useState("single"); // single | series
+  const [mode, setMode] = useState("single");
   const [date, setDate] = useState(dayKey(addDays(new Date(), 1)));
   const [weekday, setWeekday] = useState(1);
   const [seriesFrom, setSeriesFrom] = useState(dayKey(addDays(new Date(), 1)));
@@ -3084,7 +3123,6 @@ function TrainerBookingForm({ trainerTeam, bookings, bookingsByDay, addBooking, 
     }
   };
 
-  // eigene kommende Einträge
   const todayKey = dayKey(new Date());
   const mine = bookings
     .filter((b) => b.team === trainerTeam && b.date >= todayKey)
@@ -3175,11 +3213,9 @@ function MessageForm({ trainerTeam, addMessage, messages, myUid, myTeams }) {
     addMessage({ team: trainerTeam, text: t, dir: "in" });
     setText(""); setSent(true); setTimeout(() => setSent(false), 2000);
   };
-  // Eingehend (vom Platzwart): an alle, an mich persönlich ODER an eines meiner Teams
   const incoming = messages
     .filter((m) => m.dir === "out" && (m.toAll || (m.recipientUid && m.recipientUid === myUid) || (m.team && teams.includes(m.team))))
     .slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 8);
-  // Meine gesendeten: was ich selbst geschickt habe
   const mine = messages
     .filter((m) => m.dir !== "out" && ((m.senderUid && m.senderUid === myUid) || (!m.senderUid && m.team === trainerTeam)))
     .slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 5);

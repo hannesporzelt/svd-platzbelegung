@@ -2949,29 +2949,32 @@ function FreeSlotFinder({ bookings }) {
   const minToTime = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
   const todayK = dayKey(new Date());
 
-  const [date, setDate] = useState(todayK);
+  const [from, setFrom] = useState(todayK);
+  const [to, setTo] = useState(dayKey(addDays(new Date(), 6)));
   const [field, setField] = useState("p2");
   const [zone, setZone] = useState("p2_voll");
   const [minLen, setMinLen] = useState(60);
 
   const zones = fieldById(field).zones;
   const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
+  const rangeInvalid = !(from <= to);
 
-  const frame = (() => {
-    const d = new Date(date + "T12:00");
+  const frameFor = (dateKey) => {
+    const d = new Date(dateKey + "T12:00");
     const wd = (d.getDay() + 6) % 7;
     const startH = (wd === 5 || wd === 6) ? SLOT_FRAME.weekendStartH : SLOT_FRAME.weekdayStartH;
     return { start: startH * 60, end: SLOT_FRAME.endH * 60 };
-  })();
+  };
 
   const span = (e) => {
     const s = effectiveSpan(e);
     return { s: toMin(s.start), e: toMin(s.end) };
   };
 
-  const gaps = (() => {
+  const gapsForDay = (dateKey) => {
+    const frame = frameFor(dateKey);
     const blocks = (bookings || [])
-      .filter((b) => b.date === date && b.field === field && b.status !== "beantragt")
+      .filter((b) => b.date === dateKey && b.field === field && b.status !== "beantragt")
       .filter((b) => zonesShareArea(field, safeZone, b.zone))
       .map(span)
       .map((s) => ({ s: Math.max(frame.start, s.s), e: Math.min(frame.end, s.e) }))
@@ -2991,23 +2994,44 @@ function FreeSlotFinder({ bookings }) {
     }
     if (cur < frame.end) out.push({ start: cur, end: frame.end });
     return out.filter((g) => g.end - g.start >= minLen);
+  };
+
+  // Maximal 60 Tage durchsuchen (Schutz gegen versehentlich riesige Zeiträume)
+  const days = (() => {
+    if (rangeInvalid) return [];
+    const out = [];
+    let cur = new Date(from + "T12:00");
+    const end = new Date(to + "T12:00");
+    let guard = 0;
+    while (cur <= end && guard < 60) {
+      out.push(dayKey(cur));
+      cur = addDays(cur, 1);
+      guard++;
+    }
+    return out;
   })();
 
-  const d = new Date(date + "T12:00");
-  const wdLong = WEEKDAYS_LONG[(d.getDay() + 6) % 7];
+  const dayResults = days.map((dk) => ({ date: dk, gaps: gapsForDay(dk) })).filter((r) => r.gaps.length > 0);
+  const tooLong = !rangeInvalid && (() => {
+    const cur = new Date(from + "T12:00");
+    const end = new Date(to + "T12:00");
+    return Math.round((end - cur) / 86400000) >= 60;
+  })();
+
   const zoneLabel = zones.find((z) => z.id === safeZone)?.label || safeZone;
 
   return (
     <div>
       <p style={{ fontSize: 14, color: C.textSec, marginTop: 0 }}>
-        Finde freie Zeitfenster an einem Tag. Wähle Platz, Bereich und Datum –
+        Finde freie Zeitfenster in einem Zeitraum. Wähle Platz, Bereich, sowie Von- und Bis-Datum –
         die Lücken berücksichtigen alle Belegungen, die denselben Platzbereich betreffen
         (z. B. ist ein Viertel belegt, wenn die ganze Hälfte gebucht ist).
         Rahmenzeiten: Sa/So ab 09:00, sonst ab 15:00, bis 22:00.
       </p>
 
       <div style={S.formGrid}>
-        <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={S.select} /></Field>
+        <Field label="Von"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={S.select} /></Field>
+        <Field label="Bis"><input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={S.select} /></Field>
         <Field label="Platz">
           <select value={field} onChange={(e) => { setField(e.target.value); setZone(fieldById(e.target.value).zones[0].id); }} style={S.select}>
             {FIELDS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -3028,25 +3052,42 @@ function FreeSlotFinder({ bookings }) {
         </Field>
       </div>
 
-      <div style={{ ...S.subHead, marginTop: 8 }}>
-        Freie Zeiten am {wdLong}, {d.getDate()}.{d.getMonth() + 1}. · {fieldById(field).name} · {zoneLabel}
-      </div>
+      {rangeInvalid && <div style={S.warnBanner}>⚠️ Das Bis-Datum muss nach dem Von-Datum liegen.</div>}
+      {tooLong && <div style={S.warnBanner}>⚠️ Der Zeitraum ist zu lang – es werden maximal 60 Tage durchsucht.</div>}
 
-      {gaps.length === 0 && (
-        <div style={{ ...S.warnBanner, background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", display: "block" }}>
-          Keine freien Fenster von mindestens {minLen} Minuten an diesem Tag.
+      {!rangeInvalid && (
+        <div style={{ ...S.subHead, marginTop: 8 }}>
+          Freie Zeiten {fieldById(field).name} · {zoneLabel}
         </div>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {gaps.map((g, i) => {
-          const len = g.end - g.start;
-          const h = Math.floor(len / 60), m = len % 60;
-          const lenTxt = (h ? `${h} Std ` : "") + (m ? `${m} Min` : (h ? "" : "0 Min"));
+      {!rangeInvalid && dayResults.length === 0 && (
+        <div style={{ ...S.warnBanner, background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", display: "block" }}>
+          Keine freien Fenster von mindestens {minLen} Minuten im gewählten Zeitraum.
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {dayResults.map(({ date, gaps }) => {
+          const d = new Date(date + "T12:00");
           return (
-            <div key={i} style={{ ...S.listRow, borderLeft: `4px solid ${C.ok}`, paddingLeft: 10 }}>
-              <span style={{ fontWeight: 600, fontSize: 15 }}>{minToTime(g.start)} – {minToTime(g.end)}</span>
-              <span style={{ fontSize: 13, color: C.textSec }}>frei · {lenTxt.trim()}</span>
+            <div key={date}>
+              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>
+                {WEEKDAYS_LONG[(d.getDay() + 6) % 7]}, {d.getDate()}.{d.getMonth() + 1}.{d.getFullYear()}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {gaps.map((g, i) => {
+                  const len = g.end - g.start;
+                  const h = Math.floor(len / 60), m = len % 60;
+                  const lenTxt = (h ? `${h} Std ` : "") + (m ? `${m} Min` : (h ? "" : "0 Min"));
+                  return (
+                    <div key={i} style={{ ...S.listRow, borderLeft: `4px solid ${C.ok}`, paddingLeft: 10 }}>
+                      <span style={{ fontWeight: 600, fontSize: 15 }}>{minToTime(g.start)} – {minToTime(g.end)}</span>
+                      <span style={{ fontSize: 13, color: C.textSec }}>frei · {lenTxt.trim()}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           );
         })}

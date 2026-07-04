@@ -84,8 +84,12 @@ export function useBookings() {
         });
         return;
       }
-      await setDoc(doc(db, "bookings", uniqueId()), { ...clean, ownerUid: clean.ownerUid || uid() });
-      await deleteDoc(doc(db, "bookings", oldId));
+      // Direkt auf demselben Dokument updaten – atomarer als loeschen+neu anlegen,
+      // keine Race-Condition im Echtzeit-Listener. Alle Felder (Datum, Platz,
+      // Zone, Zeit) werden zuverlaessig ueberschrieben.
+      await updateDoc(doc(db, "bookings", oldId), {
+        ...clean, ownerUid: clean.ownerUid || uid(),
+      });
     },
     removeBooking: async (id, allBookings) => {
       let grp = null;

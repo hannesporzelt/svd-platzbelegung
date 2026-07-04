@@ -3,7 +3,6 @@
 export const TEAMS = [
   { id: "m1", name: "1. Mannschaft", color: "#1d4ed8" },
   { id: "m2", name: "2. Mannschaft", color: "#0ea5e9" },
-  { id: "m3", name: "3. Mannschaft", color: "#0891b2" },
   { id: "ah", name: "Alte Herren", color: "#525252" },
   { id: "sr", name: "Schiedsrichter", color: "#1a1a1a" },
   { id: "u19", name: "U19", color: "#15803d" },
@@ -43,7 +42,7 @@ export const FIELDS = [
   },
   {
     id: "p3", name: "Platz 3", subtitle: "Trainingsplatz · 2 Hälften",
-    zones: [{ id: "h1", label: "Hälfte 1" }, { id: "h2", label: "Hälfte 2" }],
+    zones: [{ id: "h1", label: "Hälfte 1" }, { id: "h2", label: "Hälfte 2 · Bahndamm" }],
   },
 ];
 export const fieldById = (id) => FIELDS.find((f) => f.id === id);

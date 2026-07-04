@@ -50,16 +50,16 @@ export default function Pitch({ field, zoneOccupants }) {
       {field === "p2" && (
         <>
           <line x1={pad} y1={H / 2} x2={W - pad} y2={H / 2} stroke="rgba(255,255,255,.55)" strokeWidth="2" strokeDasharray="8 6" />
-          <ZoneLabel x={pad} y={pad} w={innerW / 2} h={innerH / 2} zoneId="v1" label="Viertel 1 · Oberhaid" />
-          <ZoneLabel x={W / 2} y={pad} w={innerW / 2} h={innerH / 2} zoneId="v3" label="Viertel 3 · Hallstadt" />
-          <ZoneLabel x={pad} y={H / 2} w={innerW / 2} h={innerH / 2} zoneId="v2" label="Viertel 2 · Oberhaid" />
-          <ZoneLabel x={W / 2} y={H / 2} w={innerW / 2} h={innerH / 2} zoneId="v4" label="Viertel 4 · Hallstadt" />
+          <ZoneLabel x={pad} y={pad} w={innerW / 2} h={innerH / 2} zoneId="v3" label="Viertel 3 · Hallstadt" />
+          <ZoneLabel x={W / 2} y={pad} w={innerW / 2} h={innerH / 2} zoneId="v1" label="Viertel 1 · Oberhaid" />
+          <ZoneLabel x={pad} y={H / 2} w={innerW / 2} h={innerH / 2} zoneId="v4" label="Viertel 4 · Hallstadt" />
+          <ZoneLabel x={W / 2} y={H / 2} w={innerW / 2} h={innerH / 2} zoneId="v2" label="Viertel 2 · Oberhaid" />
         </>
       )}
       {field === "p3" && (
         <>
           <ZoneLabel x={pad} y={pad} w={innerW / 2} h={innerH} zoneId="h1" label="Hälfte 1" />
-          <ZoneLabel x={W / 2} y={pad} w={innerW / 2} h={innerH} zoneId="h2" label="Hälfte 2" />
+          <ZoneLabel x={W / 2} y={pad} w={innerW / 2} h={innerH} zoneId="h2" label="Bahndamm" />
         </>
       )}
       {field === "p1" && (

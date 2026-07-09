@@ -8,6 +8,7 @@ import {
   WEEKDAYS_MP, WEEKDAYS_FULL, TYPE_ICONS, TYPE_LABELS,
   MAINTENANCE_TYPES, MONTHS_NO_MOW, getDateOfISOWeek, getISOWeek,
   advanceKW, FIELD_NAMES, DEFAULT_PLAN,
+  getMaehDaysForMonth, getMaehStatusForDay,
 } from "../lib/maehplan";
 import { C, S } from "../lib/styles";
 import { dayKey } from "../lib/domain";
@@ -305,13 +306,15 @@ function FieldCard({ fieldId, fieldData, signups, canEdit, mpHooks, homeGames, w
 }
 
 // ── Monatskalender ────────────────────────────────────────────────────
-function MonatskalenderTab({ homeGames, worklog, maintenance, kw }) {
+function MonatskalenderTab({ homeGames, worklog, maintenance, kw, plan }) {
   const [calDate, setCalDate] = useState(() => {
     const d = new Date(); d.setDate(1); return d;
   });
 
   const year  = calDate.getFullYear();
   const month = calDate.getMonth();
+  // Geplante Mähtage für diesen Monat aus dem Wochenplan
+  const maehDays = getMaehDaysForMonth(plan, year, month);
 
   const shiftMonth = (delta) => {
     const d = new Date(year, month + delta, 1);
@@ -395,6 +398,31 @@ function MonatskalenderTab({ homeGames, worklog, maintenance, kw }) {
                 color: isToday ? "#15803d" : C.ink, marginBottom: 3 }}>
                 {d.getDate()}
               </div>
+              {/* Geplante Mähtage */}
+              {(maehDays[dk] || []).map(fid => {
+                const wd2 = (d.getDay() + 6) % 7;
+                const status = getMaehStatusForDay(plan, fid, wd2);
+                const besetzt = status && status.persons && status.persons.length > 0;
+                const erledigt = status && status.done;
+                const MAEH_COLORS = {
+                  p1: { color: "#15803d", bg: "#dcfce7", border: "#86efac" },
+                  p2: { color: "#0369a1", bg: "#dbeafe", border: "#93c5fd" },
+                  p3: { color: "#92400e", bg: "#fef3c7", border: "#fcd34d" },
+                };
+                const c = MAEH_COLORS[fid] || MAEH_COLORS.p1;
+                const NAMES = { p1: "P1", p2: "P2", p3: "P3" };
+                return (
+                  <div key={fid} style={{ fontSize: 9,
+                    background: erledigt ? "#e5e7eb" : besetzt ? c.bg : "transparent",
+                    color: erledigt ? "#6b7280" : c.color,
+                    border: `1px ${besetzt || erledigt ? "solid" : "dashed"} ${c.border}`,
+                    borderRadius: 3, padding: "1px 3px", marginBottom: 2,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    title={besetzt ? `Mähen ${NAMES[fid]}: ${status.persons.join(", ")}` : `Mähen ${NAMES[fid]}: noch offen`}>
+                    🌿{NAMES[fid]} {erledigt ? "✓" : besetzt ? status.persons[0] : "offen"}
+                  </div>
+                );
+              })}
               {games.map((g, j) => (
                 <div key={j} style={{ fontSize: 9, background: "#fb923c",
                   color: "#fff", borderRadius: 3, padding: "1px 3px",
@@ -429,10 +457,14 @@ function MonatskalenderTab({ homeGames, worklog, maintenance, kw }) {
       {/* Legende */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap",
         marginTop: 10, fontSize: 11, color: C.textSec }}>
+        <span><span style={{ background: "#dcfce7", color: "#15803d",
+          border: "1px solid #86efac", borderRadius: 3, padding: "0 4px" }}>🌿P1</span> Mähen geplant</span>
+        <span><span style={{ background: "transparent", color: "#15803d",
+          border: "1px dashed #86efac", borderRadius: 3, padding: "0 4px" }}>🌿P1 offen</span> noch offen</span>
         <span><span style={{ background: "#fb923c", color: "#fff",
           borderRadius: 3, padding: "0 4px" }}>⚽</span> Heimspiel</span>
         <span><span style={{ background: "#bbf7d0", color: "#166534",
-          borderRadius: 3, padding: "0 4px" }}>🌿</span> Arbeitsprotokoll</span>
+          borderRadius: 3, padding: "0 4px" }}>🌿</span> Protokoll</span>
         <span><span style={{ background: "#fef3c7", color: "#92400e",
           borderRadius: 3, padding: "0 4px" }}>🔧</span> Pflegemaßnahme</span>
       </div>
@@ -912,7 +944,7 @@ export default function MaehplanPanel({ isPlatzwart, bookings }) {
       {activeTab === "kalender" && (
         <MonatskalenderTab
           homeGames={homeGames} worklog={worklog}
-          maintenance={maintenance} kw={kw} />
+          maintenance={maintenance} kw={kw} plan={plan} />
       )}
 
       {activeTab === "pflege" && (

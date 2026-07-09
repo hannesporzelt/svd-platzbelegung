@@ -138,17 +138,40 @@ const minToTime = (mins) => {
 // Vor-/Nachlauf bei Heimspielen: 60 Min Aufwärmen davor, 15 Min Abbau danach.
 export const MATCH_PRE_MIN = 60;
 export const MATCH_POST_MIN = 15;
-export const effectiveSpan = (e) => {
+export const effectiveSpan = (e, allEntries) => {
   if (e && e.kind === "match") {
     const warmupElsewhere = e.warmupField && e.warmupField !== e.field;
-    const pre = warmupElsewhere ? 0 : MATCH_PRE_MIN;
-    return { start: minToTime(toMin(e.start) - pre), end: minToTime(toMin(e.end) + MATCH_POST_MIN) };
+    let pre = warmupElsewhere ? 0 : MATCH_PRE_MIN;
+    let post = MATCH_POST_MIN;
+    if (Array.isArray(allEntries)) {
+      const eStart = toMin(e.start);
+      const eEnd = toMin(e.end);
+      // Gibt es ein Folge-Heimspiel auf demselben Platz (Abstand <=45 Min)?
+      // Dann entfaellt der Nachlauf dieses Spiels (Abbau parallel zum naechsten).
+      const nextMatch = allEntries.find((o) =>
+        o.id !== e.id && o.kind === "match" && o.field === e.field &&
+        o.status !== "beantragt" &&
+        toMin(o.start) >= eEnd && toMin(o.start) - eEnd <= 45
+      );
+      if (nextMatch) post = 0;
+      // Gibt es ein Vorgaenger-Heimspiel auf demselben Platz (Abstand <=45 Min)?
+      // Dann entfaellt der Vorlauf dieses Spiels (Aufwaermen auf anderem Platz).
+      if (!warmupElsewhere && pre > 0) {
+        const prevMatch = allEntries.find((o) =>
+          o.id !== e.id && o.kind === "match" && o.field === e.field &&
+          o.status !== "beantragt" &&
+          toMin(o.end) <= eStart && eStart - toMin(o.end) <= 45
+        );
+        if (prevMatch) pre = 0;
+      }
+    }
+    return { start: minToTime(toMin(e.start) - pre), end: minToTime(toMin(e.end) + post) };
   }
   return { start: e.start, end: e.end };
 };
 
-export const timeOverlap = (a, b) => {
-  const ea = effectiveSpan(a), eb = effectiveSpan(b);
+export const timeOverlap = (a, b, allEntries) => {
+  const ea = effectiveSpan(a, allEntries), eb = effectiveSpan(b, allEntries);
   return toMin(ea.start) < toMin(eb.end) && toMin(eb.start) < toMin(ea.end);
 };
 
@@ -162,7 +185,7 @@ export const zonesOverlap = (a, b) => {
 
 export const findConflicts = (candidate, existing) =>
   existing.filter(
-    (e) => e.id !== candidate.id && zonesOverlap(candidate, e) && timeOverlap(candidate, e)
+    (e) => e.id !== candidate.id && zonesOverlap(candidate, e) && timeOverlap(candidate, e, existing)
   );
 
 const fullZoneOf = (fieldId) => {
@@ -189,7 +212,7 @@ export const conflictIdsForEntries = (entries) => {
   const ids = new Set();
   for (let i = 0; i < entries.length; i++)
     for (let j = i + 1; j < entries.length; j++)
-      if (zonesOverlap(entries[i], entries[j]) && timeOverlap(entries[i], entries[j])) {
+      if (zonesOverlap(entries[i], entries[j]) && timeOverlap(entries[i], entries[j], entries)) {
         ids.add(entries[i].id);
         ids.add(entries[j].id);
       }

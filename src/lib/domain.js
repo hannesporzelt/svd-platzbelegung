@@ -3,6 +3,7 @@
 export const TEAMS = [
   { id: "m1", name: "1. Mannschaft", color: "#1d4ed8" },
   { id: "m2", name: "2. Mannschaft", color: "#0ea5e9" },
+  { id: "m3", name: "3. Mannschaft", color: "#0891b2" },
   { id: "ah", name: "Alte Herren", color: "#525252" },
   { id: "sr", name: "Schiedsrichter", color: "#1a1a1a" },
   { id: "u19", name: "U19", color: "#15803d" },

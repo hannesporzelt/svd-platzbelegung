@@ -12,6 +12,7 @@ import { C, S } from "./lib/styles";
 import { ferienAn, feiertagAn } from "./lib/feiertage";
 import Pitch from "./components/Pitch";
 import MaehplanPanel from "./components/MaehplanPanel";
+import { useMaehplan, getMaehFieldsForWeekday, getMaehStatusForDay, getMaehDaysForMonth } from "./lib/maehplan";
 
 // Hinweistext für Trainer, wenn der gewünschte Slot belegt ist
 const CONFLICT_HINT = "Dieser Platz ist zur gewählten Zeit bereits belegt.\n\nBitte eine andere Uhrzeit oder einen anderen Trainingstag wählen – oder den Platzwart kontaktieren.\n\nDu kannst den Wunsch trotzdem absenden; der Platzwart entscheidet darüber.";
@@ -239,7 +240,8 @@ export default function App() {
   const { irrigation, irrigationReady, saveIrrigation } = useIrrigation();
   const maehplanCfg = (irrigation && irrigation._maehplan) || {};
   const maehplanOn = maehplanCfg.enabled === true;
-  const maehplanUrl = maehplanCfg.url || "https://svd-maehplan.vercel.app";
+  // Mähplan-Daten für Symbole in Wochen- und Monatsansicht
+  const { plan: maehplan } = useMaehplan(maehplanOn);
 
   // Heimspiel-Kurzberegnung für HEUTE (für Spieltag-Banner im Plan)
   const todayMatchIrr = useMemo(() => {
@@ -459,6 +461,7 @@ export default function App() {
             setTeamFilter={setTeamFilter}
             myTeams={myTeams}
             irrigation={irrigation}
+            maehplan={maehplan}
           />
 
           <div style={{ height: 16 }} />
@@ -484,6 +487,7 @@ export default function App() {
           notes={notes}
           setNote={setNote}
           irrigation={irrigation}
+          maehplan={maehplan}
         />
       )}
 
@@ -829,7 +833,7 @@ function WeekNav({ weekStart, setWeekStart }) {
 }
 
 /* ---------------- Wochenraster ---------------- */
-function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove, notes, setNote, teamFilter, setTeamFilter, myTeams, irrigation }) {
+function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove, notes, setNote, teamFilter, setTeamFilter, myTeams, irrigation, maehplan }) {
   const isMobile = useIsMobile();
   const todayIdx = days.findIndex((d) => dayKey(d) === dayKey(new Date()));
   const [dayIdx, setDayIdx] = useState(todayIdx >= 0 ? todayIdx : 0);
@@ -905,6 +909,31 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
               })()}
               {feiertagAn(d) && <div style={{ fontSize: 10, color: "#7a3f00", background: "#ffe8cc", borderRadius: 5, padding: "2px 5px", marginBottom: 4, fontWeight: 500 }} title="Gesetzlicher Feiertag">🎌 {feiertagAn(d)}</div>}
               {!feiertagAn(d) && ferienAn(d) && <div style={{ fontSize: 10, color: "#1d6b4f", background: "#e1f3ea", borderRadius: 5, padding: "2px 5px", marginBottom: 4 }} title="Schulferien Bayern">🏖️ {ferienAn(d)}</div>}
+              {(() => {
+                if (!maehplan) return null;
+                const wd = (d.getDay() + 6) % 7;
+                const fields = ["p1","p2","p3"].filter(fid => getMaehFieldsForWeekday(maehplan, wd).includes(fid));
+                if (fields.length === 0) return null;
+                const MAEH_COLORS = { p1: { color: "#15803d", bg: "#dcfce7" }, p2: { color: "#0369a1", bg: "#dbeafe" }, p3: { color: "#92400e", bg: "#fef3c7" } };
+                const MAEH_NAMES = { p1: "P1", p2: "P2", p3: "P3" };
+                return (
+                  <div style={{ display: "flex", gap: 4, marginBottom: 4 }} title="Mähplan">
+                    {fields.map(fid => {
+                      const status = getMaehStatusForDay(maehplan, fid, wd);
+                      const c = MAEH_COLORS[fid];
+                      const besetzt = status && status.persons && status.persons.length > 0;
+                      return (
+                        <span key={fid} style={{ fontSize: 11, color: c.color,
+                          background: c.bg, borderRadius: 5, padding: "1px 5px", fontWeight: 500,
+                          opacity: status?.done ? 0.5 : 1 }}
+                          title={besetzt ? `Mähen ${MAEH_NAMES[fid]}: ${status.persons.join(", ")}` : `Mähen ${MAEH_NAMES[fid]}: offen`}>
+                          🌿 {MAEH_NAMES[fid]}{besetzt ? " ✓" : ""}
+                        </span>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
               {lock && <div style={S.lockChip} title={lock.reason}>⛔ Gesperrt{lock.reason ? `: ${lock.reason}` : ""}</div>}
               {note && note.text && <NoteChip text={note.text} />}
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1119,13 +1148,18 @@ function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockFor
 /* ---------------- Monatsübersicht (druckbar) ---------------- */
 const MONTHS_LONG = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 
-function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField, isAdmin, removeBooking, notes, setNote, irrigation }) {
+function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField, isAdmin, removeBooking, notes, setNote, irrigation, maehplan }) {
   const irrDays = {
     p1: (irrigation && irrigation.p1 && irrigation.p1.days) || [],
     p2: (irrigation && irrigation.p2 && irrigation.p2.days) || [],
   };
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
+  // Geplante Mähtage für diesen Monat
+  const maehDays = React.useMemo(() =>
+    getMaehDaysForMonth(maehplan, year, month),
+    [maehplan, year, month]
+  );
   const shiftMonth = (delta) => { const d = new Date(year, month + delta, 1); setMonthAnchor(d); };
   const toThisMonth = () => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); setMonthAnchor(d); };
 
@@ -1189,6 +1223,31 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
               {feiertagAn(d) && <div style={{ fontSize: 8.5, color: "#7a3f00", background: "#ffe8cc", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, overflowWrap: "anywhere" }} title="Feiertag">{feiertagAn(d)}</div>}
               {!feiertagAn(d) && ferienAn(d) && <div style={{ fontSize: 8.5, color: "#1d6b4f", background: "#e1f3ea", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, overflowWrap: "anywhere" }} title="Schulferien">{ferienAn(d)}</div>}
               {anyLock.length > 0 && <div style={{ fontSize: 9, color: C.danger, marginBottom: 2 }}>⛔ gesperrt</div>}
+              {(() => {
+                const dk2 = dayKey(d);
+                const maehFields = maehDays[dk2] || [];
+                if (maehFields.length === 0) return null;
+                const MAEH_COLORS = { p1: { color: "#15803d", bg: "#dcfce7" }, p2: { color: "#0369a1", bg: "#dbeafe" }, p3: { color: "#92400e", bg: "#fef3c7" } };
+                const MAEH_NAMES = { p1: "P1", p2: "P2", p3: "P3" };
+                return (
+                  <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginBottom: 2 }}>
+                    {maehFields.map(fid => {
+                      const wd2 = (d.getDay() + 6) % 7;
+                      const status = getMaehStatusForDay(maehplan, fid, wd2);
+                      const besetzt = status && status.persons && status.persons.length > 0;
+                      const c = MAEH_COLORS[fid] || { color: "#15803d", bg: "#dcfce7" };
+                      return (
+                        <span key={fid} style={{ fontSize: 8, color: c.color, background: c.bg,
+                          borderRadius: 3, padding: "0 3px", fontWeight: 600,
+                          border: besetzt ? "none" : "1px dashed " + c.color }}
+                          title={besetzt ? `Mähen ${MAEH_NAMES[fid]}: ${status.persons.join(", ")}` : `Mähen ${MAEH_NAMES[fid]}: offen`}>
+                          🌿{MAEH_NAMES[fid]}{besetzt ? "✓" : "?"}
+                        </span>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
               {notes && notes[dayKey(d)]?.text && (
                 <div style={{ fontSize: 9, color: "#7a5d00", background: "#fff8e1", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.25, overflowWrap: "anywhere", wordBreak: "break-word" }} title={notes[dayKey(d)].text}>
                   📝 {notes[dayKey(d)].text}

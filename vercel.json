@@ -1,28 +1,22 @@
 {
-  "crons": [
-    { "path": "/api/cron-import", "schedule": "0 4 * * *" }
-  ],
-  "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
-  ],
   "headers": [
     {
-      "source": "/",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
-      ]
-    },
-    {
       "source": "/index.html",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
-      ]
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
     },
     {
       "source": "/assets/(.*)",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
-      ]
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron-import",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/maehplan-sync",
+      "schedule": "0 3 * * *"
     }
   ]
 }

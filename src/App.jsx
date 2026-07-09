@@ -1893,7 +1893,8 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
               const on = auto.triggerTeams.includes(t.id);
               return (
                 <button key={t.id} disabled={!canEdit} onClick={() => toggleTrigger(t.id)}
-                  style={{ ...S.roleBtn, ...(on ? S.roleBtnActive : {}), fontSize: 12, opacity: canEdit ? 1 : 0.6 }}>
+                  style={{ ...S.roleBtn, fontSize: 12, opacity: canEdit ? 1 : 0.6,
+                    ...(on ? { background: t.color, color: "#fff", borderColor: t.color, fontWeight: 700, boxShadow: `0 0 0 2px ${t.color}55` } : {}) }}>
                   {on ? "✓ " : "○ "}{t.name}
                 </button>
               );
@@ -2441,12 +2442,16 @@ function UserManager({ users, saveUser, setUserRole, setUserTeams, setUserRights
                 {editId === u.id ? (
                   <div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "6px 0" }}>
-                      {TEAMS.map((t) => (
-                        <button key={t.id} onClick={() => toggleTeam(t.id)}
-                          style={{ ...S.roleBtn, ...(draftTeams.includes(t.id) ? S.roleBtnActive : {}), fontSize: 12 }}>
-                          {t.name}
-                        </button>
-                      ))}
+                      {TEAMS.map((t) => {
+                        const on = draftTeams.includes(t.id);
+                        return (
+                          <button key={t.id} onClick={() => toggleTeam(t.id)}
+                            style={{ ...S.roleBtn, fontSize: 12,
+                              ...(on ? { background: t.color, color: "#fff", borderColor: t.color, fontWeight: 700, boxShadow: `0 0 0 2px ${t.color}55` } : {}) }}>
+                            {on ? "✓ " : ""}{t.name}
+                          </button>
+                        );
+                      })}
                     </div>
                     <button style={S.okBtn} onClick={() => saveTeams(u)}>Teams speichern</button>
                     <button style={{ ...S.navBtn, marginLeft: 6 }} onClick={() => setEditId(null)}>Abbrechen</button>
@@ -2482,6 +2487,27 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
   const [end, setEnd] = useState(matchLike ? "17:00" : "18:30");
   const [opponent, setOpponent] = useState("");
   const [warmupField, setWarmupField] = useState("");
+
+  // Automatischer Aufwärm-Vorschlag für Heimspiele:
+  // • Platz 2 → immer Platz 3 vorschlagen
+  // • Platz 1 → Platz 2 vorschlagen, wenn ein anderes Heimspiel an demselben Tag
+  //   auf Platz 1 existiert, dessen Ende maximal 45 Min vor dem neuen Anpfiff liegt.
+  const toMin = (t) => { const [h, m] = (t || "0:0").split(":").map(Number); return h * 60 + m; };
+  React.useEffect(() => {
+    if (kind !== "match") return;
+    if (field === "p2") { setWarmupField("p3"); return; }
+    if (field === "p1" && start) {
+      const newStart = toMin(start);
+      const clashes = (bookingsByDay[date] || []).filter((b) =>
+        b.field === "p1" && b.kind === "match" && b.status !== "beantragt" &&
+        b.start !== start && // nicht dasselbe Spiel
+        toMin(b.end) <= newStart && newStart - toMin(b.end) <= 45
+      );
+      setWarmupField(clashes.length > 0 ? "p2" : "");
+      return;
+    }
+    setWarmupField("");
+  }, [kind, field, date, start]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const zones = fieldById(field).zones;
   const safeZone = zones.find((z) => z.id === zone) ? zone : zones[0].id;
@@ -2610,8 +2636,8 @@ function BookingForm({ days, bookings, bookingsByDay, addBooking, addBookingSeri
           </Field>
         )}
         {kind === "match" && (
-          <Field label="Aufwärmen auf">
-            <select value={warmupField} onChange={(e) => setWarmupField(e.target.value)} style={S.select}>
+          <Field label={warmupField && warmupField !== field ? "Aufwärmen auf (automatisch vorgeschlagen)" : "Aufwärmen auf"}>
+            <select value={warmupField} onChange={(e) => setWarmupField(e.target.value)} style={{ ...S.select, ...(warmupField && warmupField !== field ? { borderColor: "#0891b2", fontWeight: 500 } : {}) }}>
               <option value="">Spielplatz ({fieldById(field)?.name})</option>
               {FIELDS.filter((f) => f.id !== field).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
             </select>

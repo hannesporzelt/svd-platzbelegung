@@ -61,7 +61,9 @@ function todayKeyBerlin() {
 export default async function handler(req, res) {
   // Absicherung: CRON_SECRET prüfen (POST oder GET, Vercel Cron nutzt GET)
   const auth   = req.headers.authorization || "";
-  const secret = process.env.CRON_SECRET;
+  // Eigener Schlüssel für Mähplan-Sync (MAEHPLAN_SYNC_SECRET in Vercel setzen).
+  // Fällt auf CRON_SECRET zurück falls MAEHPLAN_SYNC_SECRET nicht gesetzt.
+  const secret = process.env.MAEHPLAN_SYNC_SECRET || process.env.CRON_SECRET;
   if (!secret || auth !== `Bearer ${secret}`) {
     return res.status(401).json({ error: "Nicht autorisiert." });
   }

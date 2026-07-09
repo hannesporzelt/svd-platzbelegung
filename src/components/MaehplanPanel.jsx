@@ -85,7 +85,7 @@ function WeatherBadge({ weather, dayIndex }) {
 }
 
 // ── Aufgaben-Karte ────────────────────────────────────────────────────
-function TaskCard({ fieldId, task, accent, canEdit, mpHooks, weather }) {
+function TaskCard({ fieldId, task, accent, canEdit, mpHooks, weather, signups, kw }) {
   const [personInput, setPersonInput] = useState("");
   const [postponeOpen, setPostponeOpen] = useState(false);
   const [postponeDay, setPostponeDay] = useState(
@@ -224,12 +224,131 @@ function TaskCard({ fieldId, task, accent, canEdit, mpHooks, weather }) {
           )}
         </div>
       )}
+      {/* Vormerkungen für künftige Wochen */}
+      {(() => {
+        if (!kw) return null;
+        // Nächste 4 Wochen anzeigen
+        const nextWeeks = [];
+        let w = advanceKW(kw);
+        for (let i = 0; i < 4; i++) {
+          nextWeeks.push({ ...w });
+          w = advanceKW(w);
+        }
+        // Vorhandene Vormerkungen für diese Aufgabe
+        const taskSignups = (signups || []).filter(
+          s => s.fieldName === fieldId && s.taskId === task.id
+        );
+        const [signupOpen, setSignupOpen] = React.useState(false);
+        const [signupName, setSignupName] = React.useState("");
+
+        const monday = (wk) => {
+          const d = getDateOfISOWeek(wk.week, wk.year);
+          return d.toLocaleDateString("de-DE", { day: "numeric", month: "short" });
+        };
+
+        const handleSignup = async (wk) => {
+          const name = signupName.trim();
+          if (!name) return;
+          // Prüfen ob schon vorgemerkt
+          const existing = taskSignups.find(s => s.week === wk.week && s.year === wk.year && s.person === name);
+          if (existing) return;
+          await mpHooks.addSignup({
+            fieldName: fieldId,
+            taskId: task.id,
+            week: wk.week,
+            year: wk.year,
+            person: name,
+          });
+        };
+
+        const handleRemoveSignup = async (id) => {
+          await mpHooks.removeSignup(id);
+        };
+
+        return (
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e5e7eb" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: C.textSec }}>
+                📅 Vormerkungen ({taskSignups.length})
+              </span>
+              <button onClick={() => setSignupOpen(o => !o)}
+                style={{ ...mp.btn, fontSize: 11 }}>
+                {signupOpen ? "Schließen" : "Vormerken"}
+              </button>
+            </div>
+
+            {/* Vorhandene Vormerkungen anzeigen */}
+            {taskSignups.length > 0 && (
+              <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 3 }}>
+                {nextWeeks.map(wk => {
+                  const wkSignups = taskSignups.filter(s => s.week === wk.week && s.year === wk.year);
+                  if (wkSignups.length === 0) return null;
+                  return (
+                    <div key={wk.week + "-" + wk.year} style={{ fontSize: 11, display: "flex",
+                      alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <span style={{ color: C.textSec, minWidth: 80 }}>
+                        KW {wk.week} ({monday(wk)}):
+                      </span>
+                      {wkSignups.map(s => (
+                        <span key={s.id} style={{ background: "#dcfce7", color: "#15803d",
+                          borderRadius: 10, padding: "1px 8px", fontSize: 11,
+                          display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          👤 {s.person}
+                          <button onClick={() => handleRemoveSignup(s.id)}
+                            style={{ background: "none", border: "none", cursor: "pointer",
+                              color: "#6b7280", fontSize: 10, padding: 0, lineHeight: 1 }}>
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Vormerkung eintragen */}
+            {signupOpen && (
+              <div style={{ marginTop: 8, background: "#f0fdf4", border: "1px solid #bbf7d0",
+                borderRadius: 8, padding: 10 }}>
+                <div style={{ fontSize: 12, color: C.textSec, marginBottom: 6 }}>
+                  Name eintragen, dann Woche wählen:
+                </div>
+                <input type="text" value={signupName}
+                  onChange={e => setSignupName(e.target.value)}
+                  placeholder="Dein Name"
+                  style={{ ...mp.btn, width: "100%", boxSizing: "border-box",
+                    marginBottom: 8, padding: "6px 10px", textAlign: "left",
+                    border: `1px solid ${C.border}` }} />
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {nextWeeks.map(wk => {
+                    const alreadyMe = taskSignups.find(
+                      s => s.week === wk.week && s.year === wk.year && s.person === signupName.trim()
+                    );
+                    return (
+                      <button key={wk.week + "-" + wk.year}
+                        onClick={() => handleSignup(wk)}
+                        disabled={!signupName.trim() || !!alreadyMe}
+                        style={{ ...mp.btn, fontSize: 11,
+                          background: alreadyMe ? "#dcfce7" : "#fff",
+                          color: alreadyMe ? "#15803d" : C.ink,
+                          opacity: (!signupName.trim()) ? 0.5 : 1 }}>
+                        {alreadyMe ? "✓ " : ""}KW {wk.week} ({monday(wk)})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
 
 // ── Platz-Karte ───────────────────────────────────────────────────────
-function FieldCard({ fieldId, fieldData, signups, canEdit, mpHooks, homeGames, weather }) {
+function FieldCard({ fieldId, fieldData, signups, kw, canEdit, mpHooks, homeGames, weather }) {
   const [bemerkungEdit, setBemerkungEdit] = useState(false);
   const [bemerkungVal, setBemerkungVal] = useState(fieldData.bemerkung || "");
 
@@ -271,7 +390,8 @@ function FieldCard({ fieldId, fieldData, signups, canEdit, mpHooks, homeGames, w
 
       {(fieldData.tasks || []).map(task => (
         <TaskCard key={task.id} fieldId={fieldId} task={task}
-          accent={accent} canEdit={canEdit} mpHooks={mpHooks} weather={weather} />
+          accent={accent} canEdit={canEdit} mpHooks={mpHooks} weather={weather}
+          signups={signups} kw={kw} />
       ))}
 
       {/* Bemerkung */}
@@ -935,7 +1055,7 @@ export default function MaehplanPanel({ isPlatzwart, bookings }) {
         <div>
           {["p1","p2","p3"].map(fid => plan[fid] && (
             <FieldCard key={fid} fieldId={fid} fieldData={plan[fid]}
-              signups={signups} canEdit={isPlatzwart}
+              signups={signups} kw={kw} canEdit={isPlatzwart}
               mpHooks={mpHooks} homeGames={homeGames} weather={weather} />
           ))}
         </div>

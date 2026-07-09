@@ -401,28 +401,54 @@ export function useMaehplan(enabled = true) {
 // Gibt für jeden Tag im Monat zurück welche Plätze gemäht/gestriegelt werden.
 // Berücksichtigt dayIndex und postponedTo der aktuellen Woche.
 // Format: { "2026-07-01": ["p1","p2"], "2026-07-04": ["p3"], ... }
-export function getMaehDaysForMonth(plan, year, month) {
+// ── Mähplan-Kalender-Funktionen ──────────────────────────────────────
+// Berechnet geplante Mähtage für einen Monat – KW-genau mit Vormerkungen.
+// Gibt zurück: { "2026-07-01": [{ fieldId, persons, done, fromSignups }], ... }
+export function getMaehDaysForMonth(plan, year, month, signups, currentKW) {
   if (!plan) return {};
   const result = {};
-
-  // Alle Tage des Monats durchgehen
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   for (let day = 1; day <= daysInMonth; day++) {
     const d = new Date(year, month, day);
     const wd = (d.getDay() + 6) % 7; // 0=Mo..6=So
     const dk = `${year}-${String(month + 1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+    // KW dieses Tages berechnen
+    const dayKW = getISOWeek(d);
+    const dayYear = d.getFullYear();
+    const isCurrentKW = currentKW && dayKW === currentKW.week && dayYear === currentKW.year;
 
     const fieldsToday = [];
     for (const [fieldId, fieldData] of Object.entries(plan)) {
       if (!fieldData || !fieldData.tasks) continue;
       for (const task of fieldData.tasks) {
         if (task.type !== "mähen" && task.type !== "striegeln" && task.type !== "beides") continue;
-        // Effektiver Tag: verschoben oder Standard
         const effectiveDay = task.postponedTo !== undefined && task.postponedTo !== null
           ? task.postponedTo : task.dayIndex;
-        if (effectiveDay === wd) {
-          if (!fieldsToday.includes(fieldId)) fieldsToday.push(fieldId);
+        if (effectiveDay !== wd) continue;
+
+        if (isCurrentKW) {
+          // Aktuelle Woche: Persons aus dem Plan (aktueller Eintragungsstand)
+          fieldsToday.push({
+            fieldId,
+            persons: task.persons || [],
+            done: task.done || false,
+            fromSignups: false,
+            taskId: task.id,
+          });
+        } else {
+          // Andere Wochen: Persons aus Signups
+          const weekSignups = (signups || []).filter(s =>
+            s.fieldName === fieldId && s.taskId === task.id &&
+            s.week === dayKW && s.year === dayYear
+          );
+          fieldsToday.push({
+            fieldId,
+            persons: weekSignups.map(s => s.person),
+            done: false,
+            fromSignups: true,
+            taskId: task.id,
+          });
         }
       }
     }
@@ -449,8 +475,35 @@ export function getMaehFieldsForWeekday(plan, wd) {
   return fields;
 }
 
-// Gibt zurück ob eine Aufgabe für einen Platz an einem Wochentag besetzt ist
-// (d.h. mindestens eine Person eingetragen und erledigt oder geplant)
+// Status für einen Platz an einem konkreten Datum (KW-genau)
+export function getMaehStatusForDate(plan, fieldId, date, signups, currentKW) {
+  if (!plan || !plan[fieldId]) return null;
+  const d = new Date(date + "T00:00:00");
+  const wd = (d.getDay() + 6) % 7;
+  const dayKW = getISOWeek(d);
+  const dayYear = d.getFullYear();
+  const isCurrentKW = currentKW && dayKW === currentKW.week && dayYear === currentKW.year;
+
+  for (const task of (plan[fieldId].tasks || [])) {
+    if (task.type !== "mähen" && task.type !== "striegeln" && task.type !== "beides") continue;
+    const effectiveDay = task.postponedTo !== undefined && task.postponedTo !== null
+      ? task.postponedTo : task.dayIndex;
+    if (effectiveDay !== wd) continue;
+
+    if (isCurrentKW) {
+      return { done: task.done, persons: task.persons || [], fromSignups: false };
+    } else {
+      const weekSignups = (signups || []).filter(s =>
+        s.fieldName === fieldId && s.taskId === task.id &&
+        s.week === dayKW && s.year === dayYear
+      );
+      return { done: false, persons: weekSignups.map(s => s.person), fromSignups: true };
+    }
+  }
+  return null;
+}
+
+// Rückwärtskompatibilität
 export function getMaehStatusForDay(plan, fieldId, wd) {
   if (!plan || !plan[fieldId]) return null;
   for (const task of (plan[fieldId].tasks || [])) {
@@ -458,11 +511,7 @@ export function getMaehStatusForDay(plan, fieldId, wd) {
     const effectiveDay = task.postponedTo !== undefined && task.postponedTo !== null
       ? task.postponedTo : task.dayIndex;
     if (effectiveDay === wd) {
-      return {
-        done: task.done,
-        persons: task.persons || [],
-        type: task.type,
-      };
+      return { done: task.done, persons: task.persons || [], type: task.type };
     }
   }
   return null;

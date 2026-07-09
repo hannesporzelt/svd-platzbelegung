@@ -371,3 +371,74 @@ export function useMaehplan(enabled = true) {
     archiveSeason,
   };
 }
+
+// ── Monatsplanung: geplante Mähtage berechnen ─────────────────────────
+// Gibt für jeden Tag im Monat zurück welche Plätze gemäht/gestriegelt werden.
+// Berücksichtigt dayIndex und postponedTo der aktuellen Woche.
+// Format: { "2026-07-01": ["p1","p2"], "2026-07-04": ["p3"], ... }
+export function getMaehDaysForMonth(plan, year, month) {
+  if (!plan) return {};
+  const result = {};
+
+  // Alle Tage des Monats durchgehen
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const d = new Date(year, month, day);
+    const wd = (d.getDay() + 6) % 7; // 0=Mo..6=So
+    const dk = `${year}-${String(month + 1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+
+    const fieldsToday = [];
+    for (const [fieldId, fieldData] of Object.entries(plan)) {
+      if (!fieldData || !fieldData.tasks) continue;
+      for (const task of fieldData.tasks) {
+        if (task.type !== "mähen" && task.type !== "striegeln" && task.type !== "beides") continue;
+        // Effektiver Tag: verschoben oder Standard
+        const effectiveDay = task.postponedTo !== undefined && task.postponedTo !== null
+          ? task.postponedTo : task.dayIndex;
+        if (effectiveDay === wd) {
+          if (!fieldsToday.includes(fieldId)) fieldsToday.push(fieldId);
+        }
+      }
+    }
+    if (fieldsToday.length > 0) result[dk] = fieldsToday;
+  }
+  return result;
+}
+
+// Gibt für einen Wochentag (0=Mo..6=So) zurück welche Plätze gemäht werden
+export function getMaehFieldsForWeekday(plan, wd) {
+  if (!plan) return [];
+  const fields = [];
+  for (const [fieldId, fieldData] of Object.entries(plan)) {
+    if (!fieldData || !fieldData.tasks) continue;
+    for (const task of fieldData.tasks) {
+      if (task.type !== "mähen" && task.type !== "striegeln" && task.type !== "beides") continue;
+      const effectiveDay = task.postponedTo !== undefined && task.postponedTo !== null
+        ? task.postponedTo : task.dayIndex;
+      if (effectiveDay === wd && !fields.includes(fieldId)) {
+        fields.push(fieldId);
+      }
+    }
+  }
+  return fields;
+}
+
+// Gibt zurück ob eine Aufgabe für einen Platz an einem Wochentag besetzt ist
+// (d.h. mindestens eine Person eingetragen und erledigt oder geplant)
+export function getMaehStatusForDay(plan, fieldId, wd) {
+  if (!plan || !plan[fieldId]) return null;
+  for (const task of (plan[fieldId].tasks || [])) {
+    if (task.type !== "mähen" && task.type !== "striegeln" && task.type !== "beides") continue;
+    const effectiveDay = task.postponedTo !== undefined && task.postponedTo !== null
+      ? task.postponedTo : task.dayIndex;
+    if (effectiveDay === wd) {
+      return {
+        done: task.done,
+        persons: task.persons || [],
+        type: task.type,
+      };
+    }
+  }
+  return null;
+}

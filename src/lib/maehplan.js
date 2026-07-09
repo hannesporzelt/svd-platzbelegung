@@ -112,25 +112,37 @@ export function useMaehplan(enabled = true) {
     let loadedCount = 0;
 
     ["p1", "p2", "p3"].forEach(fieldId => {
-      const unsub = onSnapshot(doc(db, "maehplan_plan", fieldId), snap => {
-        if (snap.exists()) {
-          planData[fieldId] = snap.data();
-          if (fieldId === "p1" && snap.data().currentKW) {
-            setKw(snap.data().currentKW);
+      const unsub = onSnapshot(doc(db, "maehplan_plan", fieldId),
+        snap => {
+          if (snap.exists()) {
+            planData[fieldId] = snap.data();
+            if (fieldId === "p1" && snap.data().currentKW) {
+              setKw(snap.data().currentKW);
+            }
+          } else {
+            // Dokument existiert nicht → Standardwerte setzen UND Dokument anlegen
+            const defaultDoc = { ...DEFAULT_PLAN[fieldId], updatedTs: Date.now() };
+            if (fieldId === "p1") defaultDoc.currentKW = currentKW();
+            planData[fieldId] = defaultDoc;
+            if (fieldId === "p1") setKw(currentKW());
+            // Dokument in Firestore anlegen (setDoc erstellt es falls nicht vorhanden)
+            setDoc(doc(db, "maehplan_plan", fieldId), defaultDoc, { merge: true })
+              .catch(e => console.warn("maehplan_plan init:", e.code));
           }
-        } else {
-          // Noch kein Dokument → Standardwerte
+          loadedCount++;
+          if (loadedCount >= 3) {
+            setPlan({ ...planData });
+            setReady(true);
+          }
+        },
+        err => {
+          console.warn("maehplan_plan/" + fieldId + ":", err.code);
           planData[fieldId] = { ...DEFAULT_PLAN[fieldId] };
-          if (fieldId === "p1") {
-            setKw(currentKW());
-          }
+          if (fieldId === "p1") setKw(currentKW());
+          loadedCount++;
+          if (loadedCount >= 3) { setPlan({ ...planData }); setReady(true); }
         }
-        loadedCount++;
-        if (loadedCount >= 3) {
-          setPlan({ ...planData });
-          setReady(true);
-        }
-      });
+      );
       unsubs.push(unsub);
     });
 
@@ -141,35 +153,39 @@ export function useMaehplan(enabled = true) {
   useEffect(() => {
     if (!enabled) return;
     const q = query(collection(db, "maehplan_worklog"), orderBy("date", "desc"));
-    return onSnapshot(q, snap => {
-      setWorklog(snap.docs.map(d => ({ ...d.data(), id: d.id })));
-    });
+    return onSnapshot(q,
+      snap => { setWorklog(snap.docs.map(d => ({ ...d.data(), id: d.id }))); },
+      err => { console.warn("maehplan_worklog:", err.code); setWorklog([]); }
+    );
   }, [enabled]);
 
   // Echtzeit-Listener auf Pflegemaßnahmen
   useEffect(() => {
     if (!enabled) return;
     const q = query(collection(db, "maehplan_maintenance"), orderBy("date", "desc"));
-    return onSnapshot(q, snap => {
-      setMaintenance(snap.docs.map(d => ({ ...d.data(), id: d.id })));
-    });
+    return onSnapshot(q,
+      snap => { setMaintenance(snap.docs.map(d => ({ ...d.data(), id: d.id }))); },
+      err => { console.warn("maehplan_maintenance:", err.code); setMaintenance([]); }
+    );
   }, [enabled]);
 
   // Echtzeit-Listener auf Vormerkungen
   useEffect(() => {
     if (!enabled) return;
-    return onSnapshot(collection(db, "maehplan_signups"), snap => {
-      setSignups(snap.docs.map(d => ({ ...d.data(), id: d.id })));
-    });
+    return onSnapshot(collection(db, "maehplan_signups"),
+      snap => { setSignups(snap.docs.map(d => ({ ...d.data(), id: d.id }))); },
+      err => { console.warn("maehplan_signups:", err.code); setSignups([]); }
+    );
   }, [enabled]);
 
   // Echtzeit-Listener auf Archiv
   useEffect(() => {
     if (!enabled) return;
     const q = query(collection(db, "maehplan_archive"), orderBy("archivedAt", "desc"));
-    return onSnapshot(q, snap => {
-      setArchive(snap.docs.map(d => ({ ...d.data(), id: d.id })));
-    });
+    return onSnapshot(q,
+      snap => { setArchive(snap.docs.map(d => ({ ...d.data(), id: d.id }))); },
+      err => { console.warn("maehplan_archive:", err.code); setArchive([]); }
+    );
   }, [enabled]);
 
   // ---- Schreib-Funktionen ------------------------------------------
@@ -184,8 +200,19 @@ export function useMaehplan(enabled = true) {
   }, []);
 
   // Einzelne Task-Liste eines Platzes aktualisieren
+  // setDoc mit merge:true legt das Dokument an falls es noch nicht existiert
   const saveTasks = useCallback(async (fieldId, tasks) => {
-    await updateDoc(doc(db, "maehplan_plan", fieldId), { tasks, updatedTs: Date.now() });
+    const base = (plan && plan[fieldId]) ? plan[fieldId] : { ...(DEFAULT_PLAN[fieldId] || {}) };
+    await setDoc(doc(db, "maehplan_plan", fieldId), {
+      ...base, tasks, updatedTs: Date.now(),
+    }, { merge: true });
+  }, [plan]);
+
+  // Bemerkung aktualisieren
+  const updateBemerkung2 = useCallback(async (fieldId, text) => {
+    await setDoc(doc(db, "maehplan_plan", fieldId), {
+      bemerkung: text, updatedTs: Date.now(),
+    }, { merge: true });
   }, []);
 
   // Person zu einer Aufgabe hinzufügen
@@ -243,9 +270,7 @@ export function useMaehplan(enabled = true) {
   }, [plan, saveTasks]);
 
   // Bemerkung aktualisieren
-  const updateBemerkung = useCallback(async (fieldId, text) => {
-    await updateDoc(doc(db, "maehplan_plan", fieldId), { bemerkung: text, updatedTs: Date.now() });
-  }, []);
+  const updateBemerkung = updateBemerkung2;
 
   // Neue Woche starten
   const resetWeek = useCallback(async () => {

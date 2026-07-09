@@ -6,6 +6,52 @@ import {
   query, where, getDocs,
 } from "firebase/firestore";
 import { db, auth } from "./firebase";
+import { initializeApp as initMaehplan } from "firebase/app";
+import { getDatabase as getMaehplanDb, ref as maehRef, set as maehSet, remove as maehRemove } from "firebase/database";
+
+// ---- Mähplan-Sync: Heimspiele in Mähplan-Realtime-DB spiegeln ----
+const maehplanConfig = {
+  apiKey: "AIzaSyC-ar1GJ5qs6lBdPiJaSUOdjio0_Z3JAhw",
+  authDomain: "svd-maehplan.firebaseapp.com",
+  databaseURL: "https://svd-maehplan-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "svd-maehplan",
+  storageBucket: "svd-maehplan.firebasestorage.app",
+  messagingSenderId: "442682660955",
+  appId: "1:442682660985:web:8c2d59a0d2d2bfc7ca9ca8"
+};
+const maehplanApp = initMaehplan(maehplanConfig, "maehplan-sync");
+const maehDb = getMaehplanDb(maehplanApp);
+
+const FIELD_MAP = { p1: "Platz 1", p2: "Platz 2", p3: "Platz 3" };
+const TEAM_MAP = {
+  m1: "1. Mannschaft", m2: "2. Mannschaft", m3: "3. Mannschaft",
+  ah: "Alte Herren", u19: "U19", u17: "U17", u16: "U16", u15: "U15",
+  u14: "U14", u13: "U13", u12: "U12", u11: "U11", u10: "U10", u9: "U9", u7: "U7",
+};
+
+function syncHomeGameToMaehplan(id, booking) {
+  if (!booking || booking.kind !== "match") return;
+  const field = FIELD_MAP[booking.field];
+  if (!field) return;
+  const key = "sync_" + id.replace(/[^A-Za-z0-9_]/g, "_");
+  const entry = {
+    id: key,
+    date: booking.date,
+    time: booking.start || "",
+    team: TEAM_MAP[booking.team] || booking.team || "",
+    opponent: booking.opponent || "Gegner",
+    field,
+  };
+  // Schreibe in maehplan/_syncedGames/<key>
+  maehSet(maehRef(maehDb, "maehplan/_syncedGames/" + key), entry)
+    .catch(e => console.warn("Mähplan-Sync fehlgeschlagen:", e.message));
+}
+
+function removeSyncedGameFromMaehplan(id) {
+  const key = "sync_" + id.replace(/[^A-Za-z0-9_]/g, "_");
+  maehRemove(maehRef(maehDb, "maehplan/_syncedGames/" + key))
+    .catch(e => console.warn("Mähplan-Sync-Löschung fehlgeschlagen:", e.message));
+}
 
 const uid = () => auth.currentUser?.uid || null;
 
@@ -36,7 +82,9 @@ export function useBookings() {
     bookingsReady: ready,
     addBooking: (b) => {
       const withOwner = { ...b, ownerUid: b.ownerUid || uid() };
-      return setDoc(doc(db, "bookings", idFor(withOwner)), withOwner);
+      const id = idFor(withOwner);
+      if (withOwner.kind === "match") syncHomeGameToMaehplan(id, withOwner);
+      return setDoc(doc(db, "bookings", id), withOwner);
     },
     // Importiert BFV-Spiele: Doc-ID = bfv-<UID>, daher überschreibt ein erneuter
     // Import dasselbe Spiel (Update bei Verschiebung), statt Dubletten zu erzeugen.
@@ -60,6 +108,12 @@ export function useBookings() {
         count++;
       });
       await batch.commit();
+      // Heimspiele in Mähplan-DB spiegeln
+      games.forEach((g) => {
+        if (!g.bfvUid) return;
+        const id = "bfv-" + String(g.bfvUid).replace(/[^A-Za-z0-9_:-]/g, "");
+        syncHomeGameToMaehplan(id, g);
+      });
       return count;
     },
     addBookingSeries: async (entries) => {
@@ -90,6 +144,9 @@ export function useBookings() {
       await updateDoc(doc(db, "bookings", oldId), {
         ...clean, ownerUid: clean.ownerUid || uid(),
       });
+      // Mähplan-Sync: Heimspiel aktualisieren oder entfernen
+      if (clean.kind === "match") syncHomeGameToMaehplan(oldId, clean);
+      else removeSyncedGameFromMaehplan(oldId);
     },
     removeBooking: async (id, allBookings) => {
       let grp = null;
@@ -102,6 +159,7 @@ export function useBookings() {
           grp = cur.docs[0]?.data()?.matchGroup || null;
         } catch { /* ignore */ }
       }
+      removeSyncedGameFromMaehplan(id);
       await deleteDoc(doc(db, "bookings", id));
       if (grp) {
         try {

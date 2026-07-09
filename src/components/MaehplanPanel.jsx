@@ -8,7 +8,7 @@ import {
   WEEKDAYS_MP, WEEKDAYS_FULL, TYPE_ICONS, TYPE_LABELS,
   MAINTENANCE_TYPES, MONTHS_NO_MOW, getDateOfISOWeek, getISOWeek,
   advanceKW, FIELD_NAMES, DEFAULT_PLAN,
-  getMaehDaysForMonth, getMaehStatusForDay,
+  getMaehDaysForMonth, getMaehStatusForDay, getMaehStatusForDate,
 } from "../lib/maehplan";
 import { C, S } from "../lib/styles";
 import { dayKey } from "../lib/domain";
@@ -426,15 +426,15 @@ function FieldCard({ fieldId, fieldData, signups, kw, canEdit, mpHooks, homeGame
 }
 
 // ── Monatskalender ────────────────────────────────────────────────────
-function MonatskalenderTab({ homeGames, worklog, maintenance, kw, plan }) {
+function MonatskalenderTab({ homeGames, worklog, maintenance, kw, plan, signups }) {
   const [calDate, setCalDate] = useState(() => {
     const d = new Date(); d.setDate(1); return d;
   });
 
   const year  = calDate.getFullYear();
   const month = calDate.getMonth();
-  // Geplante Mähtage für diesen Monat aus dem Wochenplan
-  const maehDays = getMaehDaysForMonth(plan, year, month);
+  // Geplante Mähtage für diesen Monat (KW-genau mit Vormerkungen)
+  const maehDays = getMaehDaysForMonth(plan, year, month, signups, kw);
 
   const shiftMonth = (delta) => {
     const d = new Date(year, month + delta, 1);
@@ -518,12 +518,9 @@ function MonatskalenderTab({ homeGames, worklog, maintenance, kw, plan }) {
                 color: isToday ? "#15803d" : C.ink, marginBottom: 3 }}>
                 {d.getDate()}
               </div>
-              {/* Geplante Mähtage */}
-              {(maehDays[dk] || []).map(fid => {
-                const wd2 = (d.getDay() + 6) % 7;
-                const status = getMaehStatusForDay(plan, fid, wd2);
-                const besetzt = status && status.persons && status.persons.length > 0;
-                const erledigt = status && status.done;
+              {/* Geplante Mähtage (KW-genau) */}
+              {(maehDays[dk] || []).map(({ fieldId: fid, persons, done, fromSignups }) => {
+                const besetzt = persons && persons.length > 0;
                 const MAEH_COLORS = {
                   p1: { color: "#15803d", bg: "#dcfce7", border: "#86efac" },
                   p2: { color: "#0369a1", bg: "#dbeafe", border: "#93c5fd" },
@@ -533,13 +530,14 @@ function MonatskalenderTab({ homeGames, worklog, maintenance, kw, plan }) {
                 const NAMES = { p1: "P1", p2: "P2", p3: "P3" };
                 return (
                   <div key={fid} style={{ fontSize: 9,
-                    background: erledigt ? "#e5e7eb" : besetzt ? c.bg : "transparent",
-                    color: erledigt ? "#6b7280" : c.color,
-                    border: `1px ${besetzt || erledigt ? "solid" : "dashed"} ${c.border}`,
+                    background: done ? "#e5e7eb" : besetzt ? c.bg : "transparent",
+                    color: done ? "#6b7280" : c.color,
+                    border: `1px ${besetzt || done ? "solid" : "dashed"} ${c.border}`,
                     borderRadius: 3, padding: "1px 3px", marginBottom: 2,
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                    title={besetzt ? `Mähen ${NAMES[fid]}: ${status.persons.join(", ")}` : `Mähen ${NAMES[fid]}: noch offen`}>
-                    🌿{NAMES[fid]} {erledigt ? "✓" : besetzt ? status.persons[0] : "offen"}
+                    title={besetzt ? `Mähen ${NAMES[fid]}: ${persons.join(", ")}${fromSignups ? " (Vormerkung)" : ""}` : `Mähen ${NAMES[fid]}: noch offen`}>
+                    🌿{NAMES[fid]} {done ? "✓" : besetzt ? persons[0] : "offen"}
+                    {fromSignups && besetzt ? " 📅" : ""}
                   </div>
                 );
               })}
@@ -1064,7 +1062,7 @@ export default function MaehplanPanel({ isPlatzwart, bookings }) {
       {activeTab === "kalender" && (
         <MonatskalenderTab
           homeGames={homeGames} worklog={worklog}
-          maintenance={maintenance} kw={kw} plan={plan} />
+          maintenance={maintenance} kw={kw} plan={plan} signups={signups} />
       )}
 
       {activeTab === "pflege" && (

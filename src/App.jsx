@@ -1328,9 +1328,11 @@ const ADMIN_MENU = [
   { group: "Kommunikation", items: [
     ["nachrichten", "Nachrichten"],
   ] },
+  { group: "Mähplan", items: [
+    ["maehplan_pw", "Mähplan"],
+  ] },
   { group: "Pflege", items: [
     ["beregnung", "Beregnung"],
-    ["maehplan_pw", "Mähplan"],
   ] },
 ];
 const ADMIN_LABELS = ADMIN_MENU.reduce((acc, g) => { g.items.forEach(([k, l]) => { acc[k] = l; }); return acc; }, {});
@@ -1738,19 +1740,43 @@ const IRR_FIELDS = [
   { id: "p2", name: "Platz 2", geraet: "Water Control+ SC" },
 ];
 const IRR_WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const IRR_PROG_LABELS = ["A","B","C","D","E","F","G","H"];
+
+// Standard-Programm A (Migration von alten Einzel-Startzeiten)
+const IRR_DEFAULT_PROG = { runMin: 15, gapSec: 5, stations: 12, starts: ["","","","","",""] };
 const IRR_DEFAary = {
-  p1: { days: ["Mo", "Do"], runMin: 15, gapSec: 5, stations: 12, starts: ["00:45", "03:55"] },
-  p2: { days: ["Mi", "Fr"], runMin: 15, gapSec: 5, stations: 12, starts: ["00:45", "03:55"] },
+  p1: { days: ["Mo", "Do"], programmes: { A: { ...IRR_DEFAULT_PROG, starts: ["00:45","03:55","","","",""] } } },
+  p2: { days: ["Mi", "Fr"], programmes: { A: { ...IRR_DEFAULT_PROG, starts: ["00:45","03:55","","","",""] } } },
 };
 
-function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
-  const initial = (fid) => {
-    const fromDb = irrigation && irrigation[fid];
-    return fromDb ? { ...IRR_DEFAary[fid], ...fromDb } : { ...IRR_DEFAary[fid] };
+// Migriert alte Datenstruktur (starts, runMin, gapSec) → neue Programm-Struktur
+function migrateIrrField(fromDb, fid) {
+  if (!fromDb) return { ...IRR_DEFAary[fid] };
+  // Schon neue Struktur?
+  if (fromDb.programmes) return { ...IRR_DEFAary[fid], ...fromDb };
+  // Alte Struktur → Programm A daraus bauen
+  const progA = {
+    runMin: fromDb.runMin || 15,
+    gapSec: fromDb.gapSec || 5,
+    stations: fromDb.stations || 12,
+    starts: [...(fromDb.starts || []).slice(0, 6), ...Array(6).fill("")].slice(0, 6),
   };
-  const [draft, setDraft] = useState({ p1: initial("p1"), p2: initial("p2") });
-  const [savedMsg, setSavedMsg] = useState(null);
+  return { days: fromDb.days || IRR_DEFAary[fid].days, programmes: { A: progA } };
+}
 
+function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
+  // ── Draft-State: pro Platz { days, programmes: { A: {runMin,gapSec,stations,starts[6]} } }
+  const initField = (fid) => migrateIrrField(irrigation && irrigation[fid], fid);
+  const [draft, setDraft] = useState({ p1: initField("p1"), p2: initField("p2") });
+  const [savedMsg, setSavedMsg] = useState(null);
+  const [activeProg, setActiveProg] = useState({ p1: "A", p2: "A" }); // aktives Programm je Platz
+
+  React.useEffect(() => {
+    setDraft({ p1: initField("p1"), p2: initField("p2") });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [irrigation?.p1?.updatedTs, irrigation?.p2?.updatedTs]);
+
+  // ── Heimspiel-Automatik (unverändert) ──────────────────────────────
   const autoFromDb = (irrigation && irrigation._auto) || {};
   const [auto, setAuto] = useState({
     triggerTeams: autoFromDb.triggerTeams || [],
@@ -1762,88 +1788,92 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
   });
   React.useEffect(() => {
     const a = (irrigation && irrigation._auto) || {};
-    setAuto({
-      triggerTeams: a.triggerTeams || [],
-      endOffsetMin: a.endOffsetMin != null ? a.endOffsetMin : 30,
-      torP1: a.torP1 || [3, 12, 7, 8],
-      torP2: a.torP2 || [],
-      shortRunMin: a.shortRunMin || 5,
-      shortGapSec: a.shortGapSec || 5,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [irrigation?._auto?.updatedTs]);
+    setAuto({ triggerTeams: a.triggerTeams||[], endOffsetMin: a.endOffsetMin??30,
+      torP1: a.torP1||[3,12,7,8], torP2: a.torP2||[], shortRunMin: a.shortRunMin||5, shortGapSec: a.shortGapSec||5 });
+  }, [irrigation?._auto?.updatedTs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [torP1Text, setTorP1Text] = useState((autoFromDb.torP1 || [3, 12, 7, 8]).join(", "));
-  const [torP2Text, setTorP2Text] = useState((autoFromDb.torP2 || []).join(", "));
+  const [torP1Text, setTorP1Text] = useState((autoFromDb.torP1||[3,12,7,8]).join(", "));
+  const [torP2Text, setTorP2Text] = useState((autoFromDb.torP2||[]).join(", "));
   React.useEffect(() => {
     const a = (irrigation && irrigation._auto) || {};
-    setTorP1Text((a.torP1 || [3, 12, 7, 8]).join(", "));
-    setTorP2Text((a.torP2 || []).join(", "));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [irrigation?._auto?.updatedTs]);
+    setTorP1Text((a.torP1||[3,12,7,8]).join(", "));
+    setTorP2Text((a.torP2||[]).join(", "));
+  }, [irrigation?._auto?.updatedTs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const parseStations = (txt) =>
-    (txt || "").split(",").map((x) => parseInt(x.trim(), 10)).filter((n) => !isNaN(n));
-
-  const toggleTrigger = (tid) => setAuto((a) => ({
-    ...a,
-    triggerTeams: a.triggerTeams.includes(tid)
-      ? a.triggerTeams.filter((x) => x !== tid)
-      : [...a.triggerTeams, tid],
+    (txt||"").split(",").map(x => parseInt(x.trim(),10)).filter(n => !isNaN(n));
+  const toggleTrigger = (tid) => setAuto(a => ({
+    ...a, triggerTeams: a.triggerTeams.includes(tid)
+      ? a.triggerTeams.filter(x => x !== tid) : [...a.triggerTeams, tid]
   }));
   const saveAuto = async () => {
     try {
-      const torP1 = parseStations(torP1Text);
-      const torP2 = parseStations(torP2Text);
+      const torP1 = parseStations(torP1Text), torP2 = parseStations(torP2Text);
       const toSave = { ...auto, torP1, torP2 };
       setAuto(toSave);
       await saveIrrigation("_auto", toSave);
       setSavedMsg("Heimspiel-Einstellungen gespeichert.");
       setTimeout(() => setSavedMsg(null), 2500);
-    } catch (e) {
-      setSavedMsg("Speichern fehlgeschlagen: " + (e.message || ""));
-    }
+    } catch (e) { setSavedMsg("Speichern fehlgeschlagen: " + (e.message||"")); }
   };
 
   const today = dayKey(new Date());
-  const matchPlan = computeMatchIrrigation(
-    bookings, auto.triggerTeams,
-    {
-      p1: { runMin: auto.shortRunMin, gapSec: auto.shortGapSec, torStations: parseStations(torP1Text), stations: 12, endOffsetMin: auto.endOffsetMin },
-      p2: { runMin: auto.shortRunMin, gapSec: auto.shortGapSec, torStations: parseStations(torP2Text), stations: 12, endOffsetMin: auto.endOffsetMin },
-    },
-    today
-  );
+  const matchPlan = computeMatchIrrigation(bookings, auto.triggerTeams, {
+    p1: { runMin: auto.shortRunMin, gapSec: auto.shortGapSec, torStations: parseStations(torP1Text), stations: 12, endOffsetMin: auto.endOffsetMin },
+    p2: { runMin: auto.shortRunMin, gapSec: auto.shortGapSec, torStations: parseStations(torP2Text), stations: 12, endOffsetMin: auto.endOffsetMin },
+  }, today);
 
-  React.useEffect(() => {
-    setDraft({ p1: initial("p1"), p2: initial("p2") });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [irrigation?.p1?.updatedTs, irrigation?.p2?.updatedTs]);
+  // ── Hilfsfunktionen für Draft ───────────────────────────────────────
+  const updProg = (fid, prog, patch) => setDraft(d => ({
+    ...d, [fid]: { ...d[fid], programmes: { ...d[fid].programmes,
+      [prog]: { ...(d[fid].programmes?.[prog] || IRR_DEFAULT_PROG), ...patch } } }
+  }));
 
-  const upd = (fid, patch) => setDraft((d) => ({ ...d, [fid]: { ...d[fid], ...patch } }));
   const toggleDay = (fid, wd) => {
     const cur = draft[fid].days || [];
-    upd(fid, { days: cur.includes(wd) ? cur.filter((x) => x !== wd) : [...cur, wd] });
-  };
-  const setStart = (fid, idx, val) => {
-    const s = [...(draft[fid].starts || [])];
-    s[idx] = val;
-    upd(fid, { starts: s });
+    setDraft(d => ({ ...d, [fid]: { ...d[fid],
+      days: cur.includes(wd) ? cur.filter(x => x !== wd) : [...cur, wd] } }));
   };
 
+  const setStart = (fid, prog, idx, val) => {
+    const starts = [...(draft[fid].programmes?.[prog]?.starts || Array(6).fill(""))];
+    starts[idx] = val;
+    updProg(fid, prog, { starts });
+  };
+
+  const addProg = (fid) => {
+    const used = Object.keys(draft[fid].programmes || {});
+    const next = IRR_PROG_LABELS.find(l => !used.includes(l));
+    if (!next) return;
+    updProg(fid, next, { ...IRR_DEFAULT_PROG });
+    setActiveProg(a => ({ ...a, [fid]: next }));
+  };
+
+  const removeProg = (fid, prog) => {
+    if (prog === "A") return; // Programm A kann nicht gelöscht werden
+    setDraft(d => {
+      const progs = { ...d[fid].programmes };
+      delete progs[prog];
+      return { ...d, [fid]: { ...d[fid], programmes: progs } };
+    });
+    setActiveProg(a => ({ ...a, [fid]: "A" }));
+  };
+
+  // ── Konfliktprüfung: ALLE Programme ALLER Plätze ───────────────────
   const overlapsByDay = {};
-  IRR_WEEKDAYS.forEach((wd) => {
+  IRR_WEEKDAYS.forEach(wd => {
     const todays = [];
-    ["p1", "p2"].forEach((fid) => {
-      if ((draft[fid].days || []).includes(wd)) {
+    ["p1","p2"].forEach(fid => {
+      if (!(draft[fid].days||[]).includes(wd)) return;
+      Object.entries(draft[fid].programmes || {}).forEach(([prog, p]) => {
         buildIrrigationWindows({
-          fieldId: fid,
-          starts: (draft[fid].starts || []).filter(Boolean),
-          stations: draft[fid].stations || 12,
-          runMin: draft[fid].runMin || 15,
-          gapSec: draft[fid].gapSec || 0,
-        }).forEach((w) => todays.push(w));
-      }
+          fieldId: fid + "_" + prog,
+          starts: (p.starts||[]).filter(Boolean),
+          stations: p.stations || 12,
+          runMin: p.runMin || 15,
+          gapSec: p.gapSec || 0,
+        }).forEach(w => todays.push(w));
+      });
     });
     const conf = findIrrigationOverlaps(todays);
     if (conf.length > 0) overlapsByDay[wd] = conf;
@@ -1854,24 +1884,23 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
     if (hasOverlap) return;
     try {
       await saveIrrigation(fid, draft[fid]);
-      setSavedMsg(`${IRR_FIELDS.find((f) => f.id === fid).name} gespeichert.`);
+      setSavedMsg(`${IRR_FIELDS.find(f => f.id === fid).name} gespeichert.`);
       setTimeout(() => setSavedMsg(null), 2500);
-    } catch (e) {
-      setSavedMsg("Speichern fehlgeschlagen: " + (e.message || ""));
-    }
+    } catch (e) { setSavedMsg("Speichern fehlgeschlagen: " + (e.message||"")); }
   };
 
   return (
     <div>
       <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
-        Beregnungszeiten für beide Plätze. Beide Plätze teilen sich <b>eine Pumpe</b> – es darf nie mehr
-        als eine Station gleichzeitig laufen. {canEdit ? "Du kannst die Zeiten ändern." : "Nur ansehen – Änderungsrecht hat der Admin vergeben."}
+        Beregnungsprogramme für beide Plätze. Beide Plätze teilen sich <b>eine Pumpe</b> –
+        es darf nie mehr als eine Station gleichzeitig laufen (über alle Programme aller Plätze).{" "}
+        {canEdit ? "Du kannst die Programme und Zeiten ändern." : "Nur ansehen – Änderungsrecht hat der Admin."}
       </p>
 
       {hasOverlap && (
         <div style={{ ...S.warnBanner, background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", display: "block", marginBottom: 12 }}>
-          ⚠️ <b>Pumpen-Konflikt:</b> An folgenden Tagen überschneiden sich Stationen beider Plätze:{" "}
-          {Object.keys(overlapsByDay).join(", ")}. Bitte Startzeiten oder Tage anpassen. Solange ein Konflikt besteht, ist Speichern gesperrt.
+          ⚠️ <b>Pumpen-Konflikt:</b> An folgenden Tagen überschneiden sich Stationen:{" "}
+          {Object.keys(overlapsByDay).join(", ")}. Bitte Startzeiten anpassen. Speichern ist gesperrt.
         </div>
       )}
       {savedMsg && (
@@ -1880,34 +1909,41 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
         </div>
       )}
 
-      {IRR_FIELDS.map((f) => {
+      {IRR_FIELDS.map(f => {
         const d = draft[f.id];
+        const progs = d.programmes || { A: { ...IRR_DEFAULT_PROG } };
+        const progKeys = Object.keys(progs).sort();
+        const ap = activeProg[f.id] || progKeys[0] || "A";
+        const prog = progs[ap] || IRR_DEFAULT_PROG;
+        const fieldColor = f.id === "p1" ? "#0f6e3e" : "#1d6fb8";
+
+        // Fenster für aktives Programm
         const windows = buildIrrigationWindows({
-          fieldId: f.id, starts: (d.starts || []).filter(Boolean),
-          stations: d.stations || 12, runMin: d.runMin || 15, gapSec: d.gapSec || 0,
+          fieldId: f.id, starts: (prog.starts||[]).filter(Boolean),
+          stations: prog.stations||12, runMin: prog.runMin||15, gapSec: prog.gapSec||0,
         });
-        const lastEnd = windows.length ? windows[windows.length - 1].end : "—";
+        const lastEnd = windows.length ? windows[windows.length-1].end : "—";
+
         return (
           <div key={f.id} style={{ ...S.card, marginBottom: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6 }}>
-              <h3 style={{ margin: "0 0 6px", display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 12, height: 12, borderRadius: 3, background: f.id === "p1" ? "#0f6e3e" : "#1d6fb8", display: "inline-block" }} />
-                {f.name} <span style={{ fontSize: 12, color: C.textSec, fontWeight: 400 }}>· {f.geraet}</span></h3>
-              <span style={{ fontSize: 12, color: C.textSec }}>Ende letzte Station: <b>{lastEnd}</b></span>
+            {/* Platz-Kopf */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+              <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 12, height: 12, borderRadius: 3, background: fieldColor, display: "inline-block" }} />
+                {f.name} <span style={{ fontSize: 12, color: C.textSec, fontWeight: 400 }}>· {f.geraet}</span>
+              </h3>
             </div>
 
-            <div style={{ margin: "8px 0" }}>
+            {/* Bewässerungstage */}
+            <div style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 12, color: C.textSec, marginBottom: 4 }}>Bewässerungstage</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {IRR_WEEKDAYS.map((wd) => {
-                  const on = (d.days || []).includes(wd);
-                  const fieldColor = f.id === "p1" ? "#0f6e3e" : "#1d6fb8";
-                  const activeStyle = on
-                    ? { background: fieldColor, color: "#fff", borderColor: fieldColor, fontWeight: 600 }
-                    : {};
+                {IRR_WEEKDAYS.map(wd => {
+                  const on = (d.days||[]).includes(wd);
                   return (
                     <button key={wd} disabled={!canEdit} onClick={() => toggleDay(f.id, wd)}
-                      style={{ ...S.roleBtn, border: `1px solid ${C.border}`, ...activeStyle, fontSize: 12, opacity: canEdit ? 1 : 0.85 }}>
+                      style={{ ...S.roleBtn, border: `1px solid ${C.border}`, fontSize: 12,
+                        ...(on ? { background: fieldColor, color: "#fff", borderColor: fieldColor, fontWeight: 600 } : {}) }}>
                       {wd}
                     </button>
                   );
@@ -1915,65 +1951,116 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
               </div>
             </div>
 
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, margin: "8px 0" }}>
-              <label style={{ fontSize: 12, color: C.textSec }}>
-                Laufzeit/Station (Min)
-                <input type="number" min="1" max="99" disabled={!canEdit} value={d.runMin}
-                  onChange={(e) => upd(f.id, { runMin: Number(e.target.value) })}
-                  style={{ ...S.select, maxWidth: 90, marginTop: 2 }} />
-              </label>
-              <label style={{ fontSize: 12, color: C.textSec }}>
-                Pause/Station (Sek)
-                <input type="number" min="0" max="99" disabled={!canEdit} value={d.gapSec}
-                  onChange={(e) => upd(f.id, { gapSec: Number(e.target.value) })}
-                  style={{ ...S.select, maxWidth: 90, marginTop: 2 }} />
-              </label>
-            </div>
-
-            <div style={{ margin: "8px 0" }}>
-              <div style={{ fontSize: 12, color: C.textSec, marginBottom: 4 }}>Startzeiten der Durchgänge</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {[0, 1].map((idx) => (
-                  <input key={idx} type="time" disabled={!canEdit} value={(d.starts || [])[idx] || ""}
-                    onChange={(e) => setStart(f.id, idx, e.target.value)}
-                    style={{ ...S.select, maxWidth: 130 }} />
+            {/* Programm-Tabs */}
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: C.textSec, marginBottom: 6 }}>Programme</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                {progKeys.map(pl => (
+                  <button key={pl} onClick={() => setActiveProg(a => ({ ...a, [f.id]: pl }))}
+                    style={{ ...S.tab, ...(ap === pl ? S.tabActive : {}), minWidth: 36 }}>
+                    {pl}
+                  </button>
                 ))}
+                {canEdit && progKeys.length < 8 && (
+                  <button onClick={() => addProg(f.id)}
+                    style={{ ...S.tab, color: fieldColor, borderColor: fieldColor }}>
+                    + Programm
+                  </button>
+                )}
+                {canEdit && ap !== "A" && (
+                  <button onClick={() => removeProg(f.id, ap)}
+                    style={{ ...S.tab, color: C.danger, borderColor: C.danger }}>
+                    Programm {ap} löschen
+                  </button>
+                )}
+              </div>
+
+              {/* Aktives Programm bearbeiten */}
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, background: C.surface }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <b style={{ color: fieldColor }}>Programm {ap}</b>
+                  <span style={{ fontSize: 12, color: C.textSec }}>Ende letzte Station: <b>{lastEnd}</b></span>
+                </div>
+
+                {/* Parameter */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 10 }}>
+                  <label style={{ fontSize: 12, color: C.textSec }}>
+                    Stationen
+                    <input type="number" min="1" max="24" disabled={!canEdit}
+                      value={prog.stations||12}
+                      onChange={e => updProg(f.id, ap, { stations: Number(e.target.value) })}
+                      style={{ ...S.select, maxWidth: 80, marginTop: 2 }} />
+                  </label>
+                  <label style={{ fontSize: 12, color: C.textSec }}>
+                    Laufzeit/Station (Min)
+                    <input type="number" min="1" max="99" disabled={!canEdit}
+                      value={prog.runMin||15}
+                      onChange={e => updProg(f.id, ap, { runMin: Number(e.target.value) })}
+                      style={{ ...S.select, maxWidth: 80, marginTop: 2 }} />
+                  </label>
+                  <label style={{ fontSize: 12, color: C.textSec }}>
+                    Pause/Station (Sek)
+                    <input type="number" min="0" max="99" disabled={!canEdit}
+                      value={prog.gapSec||0}
+                      onChange={e => updProg(f.id, ap, { gapSec: Number(e.target.value) })}
+                      style={{ ...S.select, maxWidth: 80, marginTop: 2 }} />
+                  </label>
+                </div>
+
+                {/* Startzeiten (bis zu 6) */}
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: C.textSec, marginBottom: 4 }}>Startzeiten (bis zu 6)</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {Array.from({ length: 6 }, (_, idx) => (
+                      <div key={idx} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        <span style={{ fontSize: 10, color: C.textSec }}>Start {idx+1}</span>
+                        <input type="time" disabled={!canEdit}
+                          value={(prog.starts||[])[idx]||""}
+                          onChange={e => setStart(f.id, ap, idx, e.target.value)}
+                          style={{ ...S.select, maxWidth: 120 }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Stationszeiten */}
+                {windows.length > 0 && (
+                  <details style={{ marginTop: 6 }}>
+                    <summary style={{ cursor: "pointer", fontSize: 13, color: fieldColor }}>
+                      Stationszeiten anzeigen ({windows.length} Fenster)
+                    </summary>
+                    <div style={{ marginTop: 6, fontSize: 12, color: C.textSec,
+                      display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 4 }}>
+                      {windows.map((w, i) => (
+                        <div key={i}>Start {w.pass} · St. {w.station}: <b>{w.start}–{w.end}</b></div>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </div>
             </div>
-
-            <details style={{ marginTop: 6 }}>
-              <summary style={{ cursor: "pointer", fontSize: 13, color: C.brand }}>Stationszeiten anzeigen</summary>
-              <div style={{ marginTop: 6, fontSize: 12, color: C.textSec, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 4 }}>
-                {windows.map((w, i) => (
-                  <div key={i}>D{w.pass} · Station {w.station}: <b>{w.start}–{w.end}</b></div>
-                ))}
-              </div>
-            </details>
 
             {canEdit && (
-              <div style={{ marginTop: 10 }}>
-                <button style={{ ...S.okBtn, opacity: hasOverlap ? 0.5 : 1, cursor: hasOverlap ? "not-allowed" : "pointer" }}
-                  onClick={() => save(f.id)} disabled={hasOverlap}>
-                  {f.name} speichern
-                </button>
-                {hasOverlap && <span style={{ fontSize: 12, color: "#991b1b", marginLeft: 8 }}>Erst Pumpen-Konflikt lösen</span>}
-              </div>
+              <button style={{ ...S.okBtn, opacity: hasOverlap ? 0.5 : 1, cursor: hasOverlap ? "not-allowed" : "pointer" }}
+                onClick={() => save(f.id)} disabled={hasOverlap}>
+                {f.name} speichern
+              </button>
             )}
           </div>
         );
       })}
 
+      {/* Heimspiel-Automatik (unverändert) */}
       <div style={{ ...S.card, marginTop: 14, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
         <h3 style={{ margin: "0 0 6px" }}>⚽ Heimspiel-Automatik</h3>
         <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>
-          Für angehakte Mannschaften wird vor Heimspielen automatisch die Kurzberegnung berechnet
-          (pro Tag und Platz zählt der früheste Anpfiff). Beregnung endet {auto.endOffsetMin} Min vor Anpfiff.
+          Für angehakte Mannschaften wird vor Heimspielen automatisch die Kurzberegnung berechnet.
+          Beregnung endet {auto.endOffsetMin} Min vor Anpfiff.
         </p>
-
         <div style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 12, color: C.textSec, marginBottom: 4 }}>Diese Mannschaften lösen Kurzberegnung aus:</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {TEAMS.map((t) => {
+            {TEAMS.map(t => {
               const on = auto.triggerTeams.includes(t.id);
               return (
                 <button key={t.id} disabled={!canEdit} onClick={() => toggleTrigger(t.id)}
@@ -1985,34 +2072,31 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
             })}
           </div>
         </div>
-
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 10 }}>
           <label style={{ fontSize: 12, color: C.textSec }}>Ende vor Anpfiff (Min)
             <input type="number" min="0" max="120" disabled={!canEdit} value={auto.endOffsetMin}
-              onChange={(e) => setAuto((a) => ({ ...a, endOffsetMin: Number(e.target.value) }))}
+              onChange={e => setAuto(a => ({ ...a, endOffsetMin: Number(e.target.value) }))}
               style={{ ...S.select, maxWidth: 90, marginTop: 2 }} />
           </label>
           <label style={{ fontSize: 12, color: C.textSec }}>Laufzeit/Station (Min)
             <input type="number" min="1" max="30" disabled={!canEdit} value={auto.shortRunMin}
-              onChange={(e) => setAuto((a) => ({ ...a, shortRunMin: Number(e.target.value) }))}
+              onChange={e => setAuto(a => ({ ...a, shortRunMin: Number(e.target.value) }))}
               style={{ ...S.select, maxWidth: 90, marginTop: 2 }} />
           </label>
           <label style={{ fontSize: 12, color: C.textSec }}>Tor-Regner Platz 1 (Nr., Komma)
             <input type="text" disabled={!canEdit} value={torP1Text}
-              onChange={(e) => setTorP1Text(e.target.value)}
+              onChange={e => setTorP1Text(e.target.value)}
               placeholder="z.B. 3, 12, 7, 8"
               style={{ ...S.select, maxWidth: 160, marginTop: 2 }} />
           </label>
           <label style={{ fontSize: 12, color: C.textSec }}>Tor-Regner Platz 2 (Nr., Komma)
             <input type="text" disabled={!canEdit} value={torP2Text}
-              onChange={(e) => setTorP2Text(e.target.value)}
+              onChange={e => setTorP2Text(e.target.value)}
               placeholder="z.B. 4, 9"
               style={{ ...S.select, maxWidth: 160, marginTop: 2 }} />
           </label>
         </div>
-
         {canEdit && <button style={S.okBtn} onClick={saveAuto}>Heimspiel-Einstellungen speichern</button>}
-
         <div style={{ marginTop: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Kommende Heimspiele mit Kurzberegnung</div>
           {matchPlan.length === 0 && (
@@ -2021,7 +2105,7 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
           {matchPlan.map((m, i) => {
             const d = new Date(m.date + "T12:00");
             const datum = d.toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" });
-            const platz = m.field === "p1" ? "Platz 1" : m.field === "p2" ? "Platz 2" : m.field;
+            const platz = m.field === "p1" ? "Platz 1" : "Platz 2";
             const team = teamById(m.team)?.name || m.team;
             return (
               <div key={i} style={{ ...S.wishRow, flexDirection: "column", alignItems: "stretch", gap: 2 }}>
@@ -2034,9 +2118,7 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
                     Programm B starten <b>{m.progB}</b> · Programm C (Tor {m.torStations.join(", ")}) starten <b>{m.progC}</b> · Ende {m.end}
                   </div>
                 ) : (
-                  <div style={{ fontSize: 13 }}>
-                    Beregnung starten <b>{m.start}</b> · Ende {m.end}
-                  </div>
+                  <div style={{ fontSize: 13 }}>Beregnung starten <b>{m.start}</b> · Ende {m.end}</div>
                 )}
               </div>
             );
@@ -2048,6 +2130,7 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
     </div>
   );
 }
+
 
 function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, bookings }) {
   const saved = (irrigation && irrigation._calendars) || {};

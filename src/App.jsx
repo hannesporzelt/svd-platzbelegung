@@ -1328,10 +1328,8 @@ const ADMIN_MENU = [
   { group: "Kommunikation", items: [
     ["nachrichten", "Nachrichten"],
   ] },
-  { group: "Mähplan", items: [
-    ["maehplan_pw", "Mähplan"],
-  ] },
   { group: "Pflege", items: [
+    ["maehplan_pw", "Mähplan"],
     ["beregnung", "Beregnung"],
   ] },
 ];

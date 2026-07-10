@@ -916,25 +916,38 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
               {(() => {
                 if (!maehplan) return null;
                 const wd = (d.getDay() + 6) % 7;
-                const fields = ["p1","p2","p3"].filter(fid => getMaehFieldsForWeekday(maehplan, wd).includes(fid));
-                if (fields.length === 0) return null;
+                if (!maehplan) return null;
+                const dkStr = dayKey(d);
                 const MAEH_COLORS = { p1: { color: "#15803d", bg: "#dcfce7" }, p2: { color: "#0369a1", bg: "#dbeafe" }, p3: { color: "#92400e", bg: "#fef3c7" } };
                 const MAEH_NAMES = { p1: "P1", p2: "P2", p3: "P3" };
-                const dkStr = dayKey(d);
+                const TYPE_ICO = { "mähen": "🌿", "striegeln": "🪮", "beides": "🌿🪮", "duengen": "🧪", "sonstiges": "📝" };
+                // Aufgaben aus Wochenplan
+                const planItems = [];
+                ["p1","p2","p3"].forEach(fid => {
+                  if (!maehplan[fid]?.tasks) return;
+                  maehplan[fid].tasks.forEach(task => {
+                    if (!task.type) return;
+                    const effDay = task.postponedTo !== undefined ? task.postponedTo : task.dayIndex;
+                    if (effDay !== wd) return;
+                    const status = getMaehStatusForDate(maehplan, fid, dkStr, maehSignups, maehKw);
+                    const besetzt = status?.persons?.length > 0;
+                    planItems.push({ fid, task, status, besetzt });
+                  });
+                });
+                if (planItems.length === 0) return null;
                 return (
-                  <div style={{ display: "flex", gap: 4, marginBottom: 4 }} title="Mähplan">
-                    {fields.map(fid => {
-                      const status = getMaehStatusForDate(maehplan, fid, dkStr, maehSignups, maehKw);
-                      const c = MAEH_COLORS[fid];
-                      const besetzt = status && status.persons && status.persons.length > 0;
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 4 }}>
+                    {planItems.map(({ fid, task, status, besetzt }, i) => {
+                      const c = MAEH_COLORS[fid] || MAEH_COLORS.p1;
+                      const icon = TYPE_ICO[task.type] || "📋";
                       return (
-                        <span key={fid} style={{ fontSize: 11, color: c.color,
+                        <span key={i} style={{ fontSize: 11, color: c.color,
                           background: besetzt ? c.bg : "transparent",
                           border: `1px ${besetzt ? "solid" : "dashed"} ${c.color}`,
                           borderRadius: 5, padding: "1px 5px", fontWeight: 500,
                           opacity: status?.done ? 0.5 : 1 }}
-                          title={besetzt ? `Mähen ${MAEH_NAMES[fid]}: ${status.persons.join(", ")}` : `Mähen ${MAEH_NAMES[fid]}: offen`}>
-                          🌿 {MAEH_NAMES[fid]}{besetzt ? " ✓" : ""}
+                          title={`${icon} ${MAEH_NAMES[fid]}${besetzt ? ": " + status.persons.join(", ") : ": offen"}`}>
+                          {icon} {MAEH_NAMES[fid]}{besetzt ? " ✓" : ""}
                         </span>
                       );
                     })}
@@ -1238,17 +1251,19 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
                 const MAEH_NAMES = { p1: "P1", p2: "P2", p3: "P3" };
                 return (
                   <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginBottom: 2 }}>
-                    {maehEntries.map(({ fieldId: fid, persons, done }) => {
+                    {maehEntries.map(({ fieldId: fid, persons, done, taskType }, i) => {
                       const besetzt = persons && persons.length > 0;
                       const c = MAEH_COLORS[fid] || { color: "#15803d", bg: "#dcfce7" };
+                      const TYPE_ICO2 = { "mähen": "🌿", "striegeln": "🪮", "beides": "🌿🪮", "duengen": "🧪", "sonstiges": "📝" };
+                      const icon = TYPE_ICO2[taskType] || "🌿";
                       return (
-                        <span key={fid} style={{ fontSize: 8, color: c.color,
+                        <span key={i} style={{ fontSize: 8, color: c.color,
                           background: besetzt ? c.bg : "transparent",
                           borderRadius: 3, padding: "0 3px", fontWeight: 600,
                           border: `1px ${besetzt ? "solid" : "dashed"} ${c.color}`,
                           opacity: done ? 0.5 : 1 }}
-                          title={besetzt ? `Mähen ${MAEH_NAMES[fid]}: ${persons.join(", ")}` : `Mähen ${MAEH_NAMES[fid]}: offen`}>
-                          🌿{MAEH_NAMES[fid]}{besetzt ? "✓" : "?"}
+                          title={besetzt ? `${icon} ${MAEH_NAMES[fid]}: ${persons.join(", ")}` : `${icon} ${MAEH_NAMES[fid]}: offen`}>
+                          {icon}{MAEH_NAMES[fid]}{besetzt ? "✓" : "?"}
                         </span>
                       );
                     })}

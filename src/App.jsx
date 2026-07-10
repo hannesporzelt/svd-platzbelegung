@@ -700,14 +700,22 @@ function LoginOverlay({ onClose, loginEmail, resetPassword, registerEmail, login
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
   const [name, setName] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
+  // Registrierung: Rolle und Mannschafts-Wünsche
+  const [wunschRolle, setWunschRolle] = useState("trainer");
+  const [wunschTeams, setWunschTeams] = useState([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
 
+  const toggleWunschTeam = (tid) => setWunschTeams(t =>
+    t.includes(tid) ? t.filter(x => x !== tid) : [...t, tid]
+  );
+
   const doLogin = async () => {
     setErr(""); setInfo(""); setBusy(true);
     try {
-      await loginEmail(email, pw);
+      await loginEmail(email, pw, rememberMe);
       onClose();
     } catch (e) {
       if (!email.trim() && loginAdminPin(pw)) { onClose(); return; }
@@ -724,9 +732,10 @@ function LoginOverlay({ onClose, loginEmail, resetPassword, registerEmail, login
     if (pw !== pw2) { setErr("Die beiden Passwörter stimmen nicht überein."); return; }
     setBusy(true);
     try {
-      await registerEmail(email, pw, name);
-      setInfo("Konto erstellt! Der Platzwart schaltet dich in Kürze als Trainer frei und weist dir deine Mannschaft zu.");
-      setTimeout(onClose, 2500);
+      await registerEmail(email, pw, name, wunschRolle, wunschRolle === "trainer" ? wunschTeams : []);
+      const rolleText = wunschRolle === "platzwart" ? "Platzwart" : "Trainer";
+      setInfo(`Konto erstellt! Dein Wunsch (${rolleText}) wurde gespeichert. Der Admin schaltet dich in Kürze frei.`);
+      setTimeout(onClose, 3000);
     } catch (e) {
       const code = e?.code || "";
       if (code === "auth/email-already-in-use") setErr("Für diese E-Mail gibt es bereits ein Konto. Bitte anmelden.");
@@ -753,18 +762,56 @@ function LoginOverlay({ onClose, loginEmail, resetPassword, registerEmail, login
   return (
     <div style={ovl.backdrop} onClick={onClose}>
       <div style={ovl.box} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ margin: "0 0 4px" }}>{isReg ? "Neues Trainer-Konto" : "Anmelden"}</h3>
+        <h3 style={{ margin: "0 0 4px" }}>{isReg ? "Neues Konto anlegen" : "Anmelden"}</h3>
         <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
           {isReg
-            ? "Lege dein Trainer-Konto an. Nach der Registrierung schaltet dich der Platzwart frei und weist dir deine Mannschaft zu."
+            ? "Gib deinen Wunsch für Rolle und Mannschaft an. Der Admin schaltet dich anschließend frei."
             : "Für Trainer und Platzwart. Betrachter brauchen keine Anmeldung."}
         </p>
+
         {isReg && (
           <>
             <label style={ovl.label}>Name (optional)</label>
-            <input style={S.select} type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Vor- und Nachname" />
+            <input style={S.select} type="text" value={name}
+              onChange={(e) => setName(e.target.value)} placeholder="Vor- und Nachname" />
+
+            <label style={ovl.label}>Ich möchte als … tätig sein</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
+              {[["trainer", "Trainer"], ["platzwart", "Platzwart"]].map(([val, lbl]) => (
+                <button key={val} type="button" onClick={() => setWunschRolle(val)}
+                  style={{ flex: 1, padding: "8px 0", borderRadius: 8, cursor: "pointer",
+                    fontWeight: 600, fontSize: 13,
+                    background: wunschRolle === val ? C.brand : C.surface,
+                    color: wunschRolle === val ? "#fff" : C.ink,
+                    border: `2px solid ${wunschRolle === val ? C.brand : C.border}` }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+
+            {wunschRolle === "trainer" && (
+              <>
+                <label style={ovl.label}>Mannschaft(en) – Wunsch (mehrere möglich)</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
+                  {TEAMS.map(t => {
+                    const on = wunschTeams.includes(t.id);
+                    return (
+                      <button key={t.id} type="button" onClick={() => toggleWunschTeam(t.id)}
+                        style={{ fontSize: 12, padding: "4px 10px", borderRadius: 20, cursor: "pointer",
+                          background: on ? t.color : C.surface,
+                          color: on ? "#fff" : C.ink,
+                          border: `1px solid ${on ? t.color : C.border}`,
+                          fontWeight: on ? 600 : 400 }}>
+                        {t.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </>
         )}
+
         <label style={ovl.label}>E-Mail</label>
         <input style={S.select} type="email" autoComplete="username" value={email}
           onChange={(e) => setEmail(e.target.value)} placeholder="name@example.de" />
@@ -780,6 +827,17 @@ function LoginOverlay({ onClose, loginEmail, resetPassword, registerEmail, login
               onKeyDown={(e) => { if (e.key === "Enter") doRegister(); }} />
           </>
         )}
+
+        {/* Angemeldet bleiben – nur beim Login */}
+        {!isReg && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10,
+            fontSize: 13, color: C.ink, cursor: "pointer" }}>
+            <input type="checkbox" checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)} />
+            Angemeldet bleiben
+          </label>
+        )}
+
         {err && <p style={{ color: "#b91c1c", fontSize: 13 }}>{err}</p>}
         {info && <p style={{ color: "#15803d", fontSize: 13 }}>{info}</p>}
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
@@ -802,7 +860,7 @@ function LoginOverlay({ onClose, loginEmail, resetPassword, registerEmail, login
             </button>
           ) : (
             <button style={ovl.linkBtn} onClick={() => { setMode("register"); setErr(""); setInfo(""); }}>
-              Noch kein Konto? Als Trainer registrieren
+              Noch kein Konto? Jetzt registrieren
             </button>
           )}
         </div>
@@ -813,7 +871,7 @@ function LoginOverlay({ onClose, loginEmail, resetPassword, registerEmail, login
 
 const ovl = {
   backdrop: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 },
-  box: { background: "#fff", borderRadius: 12, padding: 20, width: "100%", maxWidth: 360, boxShadow: "0 10px 40px rgba(0,0,0,0.25)" },
+  box: { background: C.surface, borderRadius: 12, padding: 20, width: "100%", maxWidth: 400, boxShadow: "0 10px 40px rgba(0,0,0,0.25)", maxHeight: "90vh", overflowY: "auto" },
   label: { display: "block", fontSize: 12, color: C.textSec, marginTop: 10, marginBottom: 4 },
   linkBtn: { background: "none", border: "none", color: C.textSec, textDecoration: "underline", cursor: "pointer", fontSize: 13, marginTop: 12, padding: 0 },
 };
@@ -2567,9 +2625,31 @@ function UserManager({ users, saveUser, setUserRole, setUserTeams, setUserRights
               </div>
             )}
 
-            {isNew && isVorstand && (
+            {isNew && (
               <div>
-                <button style={S.okBtn} onClick={() => setUserRole(u.id, "trainer")}>Als Trainer freischalten</button>
+                {/* Wunsch des Nutzers anzeigen */}
+                {(u.wunschRolle || u.wunschTeams) && (
+                  <div style={{ fontSize: 12, background: "#eff6ff", border: "1px solid #bfdbfe",
+                    borderRadius: 8, padding: "6px 10px", marginBottom: 8 }}>
+                    💬 Wunsch: <b>{u.wunschRolle === "platzwart" ? "Platzwart" : "Trainer"}</b>
+                    {u.wunschTeams && u.wunschTeams.length > 0 && (
+                      <span> · {u.wunschTeams.map(tid => teamById(tid)?.name || tid).join(", ")}</span>
+                    )}
+                  </div>
+                )}
+                {isVorstand && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button style={S.okBtn} onClick={() => {
+                      setUserRole(u.id, u.wunschRolle || "trainer");
+                      if (u.wunschTeams && u.wunschTeams.length > 0) setUserTeams(u.id, u.wunschTeams);
+                    }}>
+                      {u.wunschRolle === "platzwart" ? "Als Platzwart freischalten" : "Als Trainer freischalten"}
+                      {u.wunschTeams && u.wunschTeams.length > 0 ? " + Teams" : ""}
+                    </button>
+                    <button style={S.navBtn} onClick={() => setUserRole(u.id, "trainer")}>Nur als Trainer</button>
+                    <button style={S.navBtn} onClick={() => setUserRole(u.id, "platzwart")}>Nur als Platzwart</button>
+                  </div>
+                )}
               </div>
             )}
 

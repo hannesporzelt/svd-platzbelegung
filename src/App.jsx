@@ -255,7 +255,7 @@ export default function App() {
     return computeMatchIrrigation(bookings, a.triggerTeams, cfg, today).filter((m) => m.date === today);
   }, [irrigation, bookings]);
 
-  const [view, setView] = useState("viewer"); // viewer | trainer | admin
+  const [view, setView] = useState("viewer"); // viewer | trainer | admin | dashboard
   const [msgsSeen, setMsgsSeen] = useState(false); // Login-Hinweis nur bis zum Ansehen zeigen
   const [trainerTeam, setTrainerTeam] = useState("u15");
 
@@ -337,13 +337,13 @@ export default function App() {
   // Platzwart-Bereich öffnen: eingeloggter Platzwart kommt direkt rein,
   // sonst Login-Maske anzeigen (echtes Konto oder Notfall-Passwort).
   const requestAdmin = () => {
-    if (isPlatzwart) { setView("admin"); return; }
+    if (isPlatzwart) { setView("dashboard"); return; }
     setShowLogin(true);
   };
 
   // Vorstand-Bereich öffnen: nur echte Admins; sonst Login-Maske.
   const requestVorstand = () => {
-    if (isVorstand) { setView("vorstand"); return; }
+    if (isVorstand) { setView("dashboard"); return; }
     setShowLogin(true);
   };
 
@@ -378,7 +378,7 @@ export default function App() {
       )}
       <Header
         view={view}
-        setView={(v) => (v === "admin" ? requestAdmin() : v === "trainer" ? requestTrainer() : v === "vorstand" ? requestVorstand() : v === "maehplan" ? setView("maehplan") : setView(v))}
+        setView={(v) => (v === "admin" ? requestAdmin() : v === "trainer" ? requestTrainer() : v === "vorstand" ? requestVorstand() : v === "maehplan" ? setView("maehplan") : v === "dashboard" ? requestAdmin() : setView(v))}
         isAdmin={isAdmin}
         isVorstand={isVorstand}
         isPlatzwart={isPlatzwart}
@@ -495,6 +495,29 @@ export default function App() {
         />
       )}
 
+      {view === "dashboard" && isPlatzwart && (
+        <PlatzwartDashboard
+          bookings={bookings}
+          messages={messages}
+          locks={locks}
+          days={days}
+          entriesForDay={entriesForDay}
+          pendingCount={pendingCount}
+          weekConflictCount={weekConflictCount}
+          openMsgCount={openMsgCount}
+          todayMatchIrr={todayMatchIrr}
+          maehplan={maehplan}
+          maehSignups={maehSignups}
+          maehKw={maehKw}
+          setView={setView}
+          setBookingStatus={setBookingStatus}
+          approveSeries={approveSeries}
+          addMessage={addMessage}
+          removeBooking={removeBooking}
+          irrigation={irrigation}
+        />
+      )}
+
       {view === "admin" && isAdmin && (
         <AdminPanel
           days={days}
@@ -592,10 +615,11 @@ function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, r
   const teamOptions = (role === "trainer" && myTeams.length > 0)
     ? TEAMS.filter((t) => myTeams.includes(t.id))
     : TEAMS;
-  const roleLabel = view === "maehplan" ? "Mähplan" : view === "vorstand" ? "Vorstand" : view === "admin" ? "Platzwart" : view === "trainer" ? "Trainer" : "Betrachter";
+  const roleLabel = view === "maehplan" ? "Mähplan" : view === "dashboard" ? "Dashboard" : view === "vorstand" ? "Vorstand" : view === "admin" ? "Platzwart" : view === "trainer" ? "Trainer" : "Betrachter";
 
   const ROLES = [
-    ["viewer", "Betrachter"], ["trainer", "Trainer"], ["admin", "Platzwart"],
+    ["viewer", "Betrachter"], ["trainer", "Trainer"],
+    ...(isPlatzwart ? [["dashboard", "Dashboard"], ["admin", "Platzwart-Bereich"]] : []),
     ...(isVorstand ? [["vorstand", "Vorstand"]] : []),
     ...(maehplanOn && isPlatzwart ? [["maehplan", "Mähplan"]] : []),
   ];
@@ -875,6 +899,298 @@ const ovl = {
   label: { display: "block", fontSize: 12, color: C.textSec, marginTop: 10, marginBottom: 4 },
   linkBtn: { background: "none", border: "none", color: C.textSec, textDecoration: "underline", cursor: "pointer", fontSize: 13, marginTop: 12, padding: 0 },
 };
+
+/* ---------------- Platzwart-Dashboard ---------------- */
+function PlatzwartDashboard({
+  bookings, messages, locks, days, entriesForDay,
+  pendingCount, weekConflictCount, openMsgCount, todayMatchIrr,
+  maehplan, maehSignups, maehKw, setView,
+  setBookingStatus, approveSeries, addMessage, removeBooking, irrigation,
+}) {
+  const today = new Date();
+  const todayKey = dayKey(today);
+  const todayEntries = entriesForDay(today).slice().sort((a,b) => a.start.localeCompare(b.start));
+
+  // Nächstes Heimspiel (ab heute)
+  const nextGame = bookings
+    .filter(b => b.kind === "match" && b.status !== "beantragt" && b.date >= todayKey)
+    .sort((a,b) => (a.date+a.start).localeCompare(b.date+b.start))[0] || null;
+
+  // Offene Anträge (die 3 nächsten)
+  const pending = bookings
+    .filter(b => b.status === "beantragt" && b.date >= todayKey)
+    .sort((a,b) => (a.date+a.start).localeCompare(b.date+b.start))
+    .slice(0, 3);
+
+  // Neue Nachrichten (die 3 neuesten)
+  const newMsgs = messages
+    .filter(m => !m.done && m.dir !== "out")
+    .sort((a,b) => (b.ts||0)-(a.ts||0))
+    .slice(0, 3);
+
+  // Mähplan heute
+  const todayWd = (today.getDay() + 6) % 7;
+  const maehHeute = maehplan ? ["p1","p2","p3"].filter(fid => {
+    if (!maehplan[fid]?.tasks) return false;
+    return maehplan[fid].tasks.some(t => {
+      const eff = t.postponedTo !== undefined ? t.postponedTo : t.dayIndex;
+      return eff === todayWd;
+    });
+  }) : [];
+
+  // Sperren heute
+  const locksHeute = locks.filter(l =>
+    todayKey >= l.from && todayKey <= l.to + "T23:59"
+  );
+
+  const fmtDate = (dk) => {
+    const d = new Date(dk + "T12:00");
+    return d.toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" });
+  };
+
+  // Kachel-Stil
+  const tile = (bg, border, color) => ({
+    background: bg, border: `1px solid ${border}`, borderRadius: 12,
+    padding: 14, flex: "1 1 200px", minWidth: 0,
+  });
+  const tileHead = (color) => ({
+    fontWeight: 700, fontSize: 13, color, marginBottom: 8,
+    display: "flex", alignItems: "center", gap: 6,
+  });
+  const tileVal = { fontSize: 26, fontWeight: 800, color: C.ink, lineHeight: 1 };
+  const tileLink = {
+    fontSize: 12, color: C.brand, background: "none", border: "none",
+    cursor: "pointer", textDecoration: "underline", padding: 0, marginTop: 6,
+    display: "block",
+  };
+
+  return (
+    <div style={{ marginTop: "1rem" }}>
+      {/* Begrüßung */}
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{ margin: 0, fontSize: 22, color: C.brand }}>
+          {today.getHours() < 12 ? "Guten Morgen" : today.getHours() < 18 ? "Guten Tag" : "Guten Abend"} 👋
+        </h2>
+        <div style={{ fontSize: 13, color: C.textSec }}>
+          {today.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+        </div>
+      </div>
+
+      {/* Kennzahlen-Kacheln */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+        {/* Offene Anträge */}
+        <div style={tile(pendingCount > 0 ? "#fff7ed" : C.surface, pendingCount > 0 ? "#fed7aa" : C.border, C.ink)}>
+          <div style={tileHead(pendingCount > 0 ? "#c2410c" : C.textSec)}>
+            📬 Offene Anträge
+          </div>
+          <div style={{ ...tileVal, color: pendingCount > 0 ? "#c2410c" : C.ink }}>{pendingCount}</div>
+          {pendingCount > 0 && (
+            <button style={tileLink} onClick={() => setView("admin")}>→ Freigeben</button>
+          )}
+        </div>
+
+        {/* Konflikte */}
+        <div style={tile(weekConflictCount > 0 ? "#fef2f2" : C.surface, weekConflictCount > 0 ? "#fecaca" : C.border, C.ink)}>
+          <div style={tileHead(weekConflictCount > 0 ? "#dc2626" : C.textSec)}>
+            ⚠️ Konflikte diese Woche
+          </div>
+          <div style={{ ...tileVal, color: weekConflictCount > 0 ? "#dc2626" : C.ink }}>{weekConflictCount}</div>
+          {weekConflictCount > 0 && (
+            <button style={tileLink} onClick={() => setView("admin")}>→ Konflikte anzeigen</button>
+          )}
+        </div>
+
+        {/* Nachrichten */}
+        <div style={tile(openMsgCount > 0 ? "#fffbeb" : C.surface, openMsgCount > 0 ? "#fde68a" : C.border, C.ink)}>
+          <div style={tileHead(openMsgCount > 0 ? "#92400e" : C.textSec)}>
+            💬 Neue Nachrichten
+          </div>
+          <div style={{ ...tileVal, color: openMsgCount > 0 ? "#92400e" : C.ink }}>{openMsgCount}</div>
+          {openMsgCount > 0 && (
+            <button style={tileLink} onClick={() => setView("admin")}>→ Nachrichten lesen</button>
+          )}
+        </div>
+
+        {/* Mähplan heute */}
+        <div style={tile(maehHeute.length > 0 ? "#f0fdf4" : C.surface, maehHeute.length > 0 ? "#bbf7d0" : C.border, C.ink)}>
+          <div style={tileHead("#15803d")}>🌿 Mähplan heute</div>
+          {maehHeute.length === 0 ? (
+            <div style={{ fontSize: 13, color: C.textSec }}>Kein Mähen heute</div>
+          ) : (
+            <div>
+              {maehHeute.map(fid => {
+                const NAMES = { p1: "Platz 1", p2: "Platz 2", p3: "Platz 3" };
+                const tasks = maehplan[fid]?.tasks?.filter(t => {
+                  const eff = t.postponedTo !== undefined ? t.postponedTo : t.dayIndex;
+                  return eff === todayWd;
+                }) || [];
+                return tasks.map(t => (
+                  <div key={fid+t.id} style={{ fontSize: 13, marginBottom: 4 }}>
+                    <b>{NAMES[fid]}</b> · {t.persons?.length > 0
+                      ? t.persons.join(", ")
+                      : <span style={{ color: "#dc2626" }}>⚠️ noch niemand eingetragen</span>}
+                    {t.done && <span style={{ color: "#15803d" }}> ✓</span>}
+                  </div>
+                ));
+              })}
+              <button style={tileLink} onClick={() => setView("maehplan")}>→ Mähplan öffnen</button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Zwei Spalten: links Heute, rechts Nächstes Heimspiel + Anträge */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+
+        {/* Heutige Belegung */}
+        <div style={{ ...S.card, flex: "1 1 280px" }}>
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10, color: C.brand }}>
+            📅 Belegung heute
+          </div>
+          {locksHeute.length > 0 && locksHeute.map(l => (
+            <div key={l.id} style={{ fontSize: 13, color: "#dc2626", background: "#fef2f2",
+              borderRadius: 8, padding: "6px 10px", marginBottom: 6 }}>
+              ⛔ {fieldById(l.field)?.name} gesperrt{l.reason ? ` · ${l.reason}` : ""}
+            </div>
+          ))}
+          {todayMatchIrr.length > 0 && (
+            <div style={{ fontSize: 12, background: "#eff6ff", color: "#1e40af",
+              borderRadius: 8, padding: "6px 10px", marginBottom: 8 }}>
+              💧 Kurzberegnung vor Heimspiel heute
+            </div>
+          )}
+          {todayEntries.length === 0 && locksHeute.length === 0 && (
+            <div style={{ fontSize: 13, color: C.textSec }}>Keine Belegungen heute.</div>
+          )}
+          {todayEntries.map(e => {
+            const t = teamById(e.team);
+            const fieldShort = { p1: "P1", p2: "P2", p3: "P3" };
+            return (
+              <div key={e.id} style={{ ...S.listRow, fontSize: 13 }}>
+                <span style={{ borderLeft: `3px solid ${t?.color || C.textSec}`, paddingLeft: 8 }}>
+                  <b>{t?.name || e.team}</b> · {fieldShort[e.field]}
+                  {e.kind === "match" ? ` · ⚽ vs. ${e.opponent || "Heimspiel"}` : ` · ${e.start}–${e.end}`}
+                </span>
+              </div>
+            );
+          })}
+          <button style={{ ...S.navBtn, marginTop: 8, width: "100%" }}
+            onClick={() => setView("viewer")}>Kalender öffnen →</button>
+        </div>
+
+        {/* Rechte Spalte */}
+        <div style={{ flex: "1 1 280px", display: "flex", flexDirection: "column", gap: 12 }}>
+
+          {/* Nächstes Heimspiel */}
+          <div style={{ ...S.card }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10, color: "#c2410c" }}>
+              ⚽ Nächstes Heimspiel
+            </div>
+            {!nextGame ? (
+              <div style={{ fontSize: 13, color: C.textSec }}>Kein Heimspiel eingetragen.</div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600 }}>
+                  {fmtDate(nextGame.date)}
+                  {nextGame.start ? ` · ${nextGame.start} Uhr` : ""}
+                </div>
+                <div style={{ fontSize: 13, color: C.textSec, marginTop: 4 }}>
+                  {teamById(nextGame.team)?.name || nextGame.team}
+                  {nextGame.opponent ? ` · vs. ${nextGame.opponent}` : ""}
+                  {` · ${fieldById(nextGame.field)?.name}`}
+                </div>
+                <div style={{ fontSize: 12, color: C.textSec, marginTop: 2 }}>
+                  Platz belegt {effectiveSpan(nextGame).start}–{effectiveSpan(nextGame).end}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Offene Anträge Vorschau */}
+          {pending.length > 0 && (
+            <div style={{ ...S.card }}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10, color: "#c2410c" }}>
+                📬 Anträge zur Freigabe
+              </div>
+              {pending.map(b => (
+                <div key={b.id} style={{ ...S.listRow, fontSize: 13, flexWrap: "wrap" }}>
+                  <span style={{ flex: "1 1 160px",
+                    borderLeft: `3px solid ${teamById(b.team)?.color || C.textSec}`,
+                    paddingLeft: 8 }}>
+                    <b>{teamById(b.team)?.name || b.team}</b><br/>
+                    <span style={{ color: C.textSec }}>
+                      {fmtDate(b.date)} · {b.start}–{b.end} · {fieldById(b.field)?.name}
+                    </span>
+                  </span>
+                  <button style={{ ...S.okBtn, fontSize: 12 }}
+                    onClick={() => setBookingStatus(b.id, "frei")}>
+                    Freigeben
+                  </button>
+                </div>
+              ))}
+              {pendingCount > 3 && (
+                <button style={{ ...S.navBtn, width: "100%", marginTop: 6 }}
+                  onClick={() => setView("admin")}>
+                  + {pendingCount - 3} weitere anzeigen
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Neue Nachrichten Vorschau */}
+          {newMsgs.length > 0 && (
+            <div style={{ ...S.card }}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10, color: "#92400e" }}>
+                💬 Nachrichten
+              </div>
+              {newMsgs.map(m => (
+                <div key={m.id} style={{ ...S.listRow, fontSize: 13, flexDirection: "column",
+                  alignItems: "stretch", gap: 2 }}>
+                  <div style={{ fontWeight: 600 }}>
+                    {teamById(m.team)?.name || m.team}
+                    <span style={{ fontSize: 11, color: C.textSec, fontWeight: 400, marginLeft: 6 }}>
+                      {m.ts ? new Date(m.ts).toLocaleString("de-DE",
+                        { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
+                    </span>
+                  </div>
+                  <div style={{ color: C.textSec }}>{m.text}</div>
+                </div>
+              ))}
+              {openMsgCount > 3 && (
+                <button style={{ ...S.navBtn, width: "100%", marginTop: 6 }}
+                  onClick={() => setView("admin")}>
+                  + {openMsgCount - 3} weitere
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Schnellzugriff */}
+      <div style={{ ...S.card, marginTop: 12 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: C.textSec }}>
+          Schnellzugriff
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {[
+            ["📅 Kalender", "viewer"],
+            ["✏️ Belegung eintragen", "admin"],
+            ["📬 Anträge freigeben", "admin"],
+            ["💬 Nachrichten", "admin"],
+            ["🌿 Mähplan", "maehplan"],
+            ["💧 Beregnung", "admin"],
+          ].map(([label, target]) => (
+            <button key={label} onClick={() => setView(target)}
+              style={{ ...S.navBtn, fontSize: 13 }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ---------------- Wochennavigation ---------------- */
 function WeekNav({ weekStart, setWeekStart }) {

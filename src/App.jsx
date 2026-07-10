@@ -256,6 +256,10 @@ export default function App() {
   }, [irrigation, bookings]);
 
   const [view, setView] = useState("viewer"); // viewer | trainer | admin | dashboard
+  const [adminTab, setAdminTab] = useState(null); // welcher Admin-Tab beim nächsten Öffnen direkt gezeigt werden soll
+  React.useEffect(() => {
+    if (view !== "admin") setAdminTab(null);
+  }, [view]);
   const [msgsSeen, setMsgsSeen] = useState(false); // Login-Hinweis nur bis zum Ansehen zeigen
   const [trainerTeam, setTrainerTeam] = useState("u15");
 
@@ -510,6 +514,7 @@ export default function App() {
           maehSignups={maehSignups}
           maehKw={maehKw}
           setView={setView}
+          setAdminTab={setAdminTab}
           setBookingStatus={setBookingStatus}
           approveSeries={approveSeries}
           addMessage={addMessage}
@@ -520,6 +525,7 @@ export default function App() {
 
       {view === "admin" && isAdmin && (
         <AdminPanel
+          initialTab={adminTab}
           days={days}
           bookings={bookings}
           bookingsByDay={bookingsByDay}
@@ -904,9 +910,11 @@ const ovl = {
 function PlatzwartDashboard({
   bookings, messages, locks, days, entriesForDay,
   pendingCount, weekConflictCount, openMsgCount, todayMatchIrr,
-  maehplan, maehSignups, maehKw, setView,
+  maehplan, maehSignups, maehKw, setView, setAdminTab,
   setBookingStatus, approveSeries, addMessage, removeBooking, irrigation,
 }) {
+  // Direkt in einen bestimmten Admin-Tab springen, statt nur allgemein "Admin" zu öffnen
+  const goAdmin = (t) => { setAdminTab(t); setView("admin"); };
   const today = new Date();
   const todayKey = dayKey(today);
   const todayEntries = entriesForDay(today).slice().sort((a,b) => a.start.localeCompare(b.start));
@@ -985,7 +993,7 @@ function PlatzwartDashboard({
           </div>
           <div style={{ ...tileVal, color: pendingCount > 0 ? "#c2410c" : C.ink }}>{pendingCount}</div>
           {pendingCount > 0 && (
-            <button style={tileLink} onClick={() => setView("admin")}>→ Freigeben</button>
+            <button style={tileLink} onClick={() => goAdmin("trainingstage")}>→ Freigeben</button>
           )}
         </div>
 
@@ -996,7 +1004,7 @@ function PlatzwartDashboard({
           </div>
           <div style={{ ...tileVal, color: weekConflictCount > 0 ? "#dc2626" : C.ink }}>{weekConflictCount}</div>
           {weekConflictCount > 0 && (
-            <button style={tileLink} onClick={() => setView("admin")}>→ Konflikte anzeigen</button>
+            <button style={tileLink} onClick={() => goAdmin("konflikte")}>→ Konflikte anzeigen</button>
           )}
         </div>
 
@@ -1007,7 +1015,7 @@ function PlatzwartDashboard({
           </div>
           <div style={{ ...tileVal, color: openMsgCount > 0 ? "#92400e" : C.ink }}>{openMsgCount}</div>
           {openMsgCount > 0 && (
-            <button style={tileLink} onClick={() => setView("admin")}>→ Nachrichten lesen</button>
+            <button style={tileLink} onClick={() => goAdmin("nachrichten")}>→ Nachrichten lesen</button>
           )}
         </div>
 
@@ -1130,7 +1138,7 @@ function PlatzwartDashboard({
               ))}
               {pendingCount > 3 && (
                 <button style={{ ...S.navBtn, width: "100%", marginTop: 6 }}
-                  onClick={() => setView("admin")}>
+                  onClick={() => goAdmin("trainingstage")}>
                   + {pendingCount - 3} weitere anzeigen
                 </button>
               )}
@@ -1158,7 +1166,7 @@ function PlatzwartDashboard({
               ))}
               {openMsgCount > 3 && (
                 <button style={{ ...S.navBtn, width: "100%", marginTop: 6 }}
-                  onClick={() => setView("admin")}>
+                  onClick={() => goAdmin("nachrichten")}>
                   + {openMsgCount - 3} weitere
                 </button>
               )}
@@ -1174,14 +1182,14 @@ function PlatzwartDashboard({
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {[
-            ["📅 Kalender", "viewer"],
-            ["✏️ Belegung eintragen", "admin"],
-            ["📬 Anträge freigeben", "admin"],
-            ["💬 Nachrichten", "admin"],
-            ["🌿 Mähplan", "maehplan"],
-            ["💧 Beregnung", "admin"],
-          ].map(([label, target]) => (
-            <button key={label} onClick={() => setView(target)}
+            ["📅 Kalender", "viewer", null],
+            ["✏️ Belegung eintragen", "admin", "belegung"],
+            ["📬 Anträge freigeben", "admin", "trainingstage"],
+            ["💬 Nachrichten", "admin", "nachrichten"],
+            ["🌿 Mähplan", "maehplan", null],
+            ["💧 Beregnung", "admin", "beregnung"],
+          ].map(([label, target, tabKey]) => (
+            <button key={label} onClick={() => (target === "admin" ? goAdmin(tabKey) : setView(target))}
               style={{ ...S.navBtn, fontSize: 13 }}>
               {label}
             </button>
@@ -1773,8 +1781,13 @@ const ADMIN_MENU = [
 ];
 const ADMIN_LABELS = ADMIN_MENU.reduce((acc, g) => { g.items.forEach(([k, l]) => { acc[k] = l; }); return acc; }, {});
 
-function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, canEditIrrigation, importBookings }) {
-  const [tab, setTab] = useState("belegung");
+function AdminPanel({ initialTab, days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, canEditIrrigation, importBookings }) {
+  const [tab, setTab] = useState(initialTab || "belegung");
+  // Wenn von außen (Dashboard/Schnellzugriff) ein bestimmter Tab angefordert wird, direkt dorthin springen
+  React.useEffect(() => {
+    if (initialTab) setTab(initialTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTab]);
   const [menuOpen, setMenuOpen] = useState(false);
   const menu = isVorstand
     ? [...ADMIN_MENU, { group: "Vorstand", items: [

@@ -48,8 +48,8 @@ export const FIELD_COLORS = {
 
 export const FIELD_NAMES = { p1: "Platz 1", p2: "Platz 2", p3: "Platz 3" };
 
-export const TYPE_ICONS  = { "mähen": "🌿", "striegeln": "🪮", "beides": "🌿🪮", "duengen": "🧪" };
-export const TYPE_LABELS = { "mähen": "Mähen", "striegeln": "Striegeln", "beides": "Mähen & Striegeln", "duengen": "Düngen" };
+export const TYPE_ICONS  = { "mähen": "🌿", "striegeln": "🪮", "beides": "🌿🪮", "duengen": "🧪", "sonstiges": "📝" };
+export const TYPE_LABELS = { "mähen": "Mähen", "striegeln": "Striegeln", "beides": "Mähen & Striegeln", "duengen": "Düngen", "sonstiges": "Sonstiges" };
 
 export const MAINTENANCE_TYPES = {
   "nachsaeen":     { icon: "🌱", label: "Nachsäen" },
@@ -58,6 +58,7 @@ export const MAINTENANCE_TYPES = {
   "vertikutieren": { icon: "🍂", label: "Vertikutieren" },
   "striegeln":     { icon: "🪮", label: "Striegeln" },
   "duengen":       { icon: "🧪", label: "Düngen" },
+  "sonstiges":     { icon: "📝", label: "Sonstiges" },
 };
 
 export const WEEKDAYS_MP  = ["Mo","Di","Mi","Do","Fr","Sa","So"];
@@ -422,28 +423,28 @@ export function getMaehDaysForMonth(plan, year, month, signups, currentKW) {
     for (const [fieldId, fieldData] of Object.entries(plan)) {
       if (!fieldData || !fieldData.tasks) continue;
       for (const task of fieldData.tasks) {
-        if (task.type !== "mähen" && task.type !== "striegeln" && task.type !== "beides") continue;
+        if (!task.type) continue; // alle Aufgabentypen anzeigen
         const effectiveDay = task.postponedTo !== undefined && task.postponedTo !== null
           ? task.postponedTo : task.dayIndex;
         if (effectiveDay !== wd) continue;
 
         if (isCurrentKW) {
-          // Aktuelle Woche: Persons aus dem Plan (aktueller Eintragungsstand)
           fieldsToday.push({
             fieldId,
+            taskType: task.type,
             persons: task.persons || [],
             done: task.done || false,
             fromSignups: false,
             taskId: task.id,
           });
         } else {
-          // Andere Wochen: Persons aus Signups
           const weekSignups = (signups || []).filter(s =>
             s.fieldName === fieldId && s.taskId === task.id &&
             s.week === dayKW && s.year === dayYear
           );
           fieldsToday.push({
             fieldId,
+            taskType: task.type,
             persons: weekSignups.map(s => s.person),
             done: false,
             fromSignups: true,
@@ -464,7 +465,7 @@ export function getMaehFieldsForWeekday(plan, wd) {
   for (const [fieldId, fieldData] of Object.entries(plan)) {
     if (!fieldData || !fieldData.tasks) continue;
     for (const task of fieldData.tasks) {
-      if (task.type !== "mähen" && task.type !== "striegeln" && task.type !== "beides") continue;
+      if (!task.type) continue; // alle Aufgabentypen anzeigen
       const effectiveDay = task.postponedTo !== undefined && task.postponedTo !== null
         ? task.postponedTo : task.dayIndex;
       if (effectiveDay === wd && !fields.includes(fieldId)) {
@@ -485,7 +486,7 @@ export function getMaehStatusForDate(plan, fieldId, date, signups, currentKW) {
   const isCurrentKW = currentKW && dayKW === currentKW.week && dayYear === currentKW.year;
 
   for (const task of (plan[fieldId].tasks || [])) {
-    if (task.type !== "mähen" && task.type !== "striegeln" && task.type !== "beides") continue;
+    if (!task.type) continue; // alle Aufgabentypen anzeigen
     const effectiveDay = task.postponedTo !== undefined && task.postponedTo !== null
       ? task.postponedTo : task.dayIndex;
     if (effectiveDay !== wd) continue;
@@ -507,7 +508,7 @@ export function getMaehStatusForDate(plan, fieldId, date, signups, currentKW) {
 export function getMaehStatusForDay(plan, fieldId, wd) {
   if (!plan || !plan[fieldId]) return null;
   for (const task of (plan[fieldId].tasks || [])) {
-    if (task.type !== "mähen" && task.type !== "striegeln" && task.type !== "beides") continue;
+    if (!task.type) continue; // alle Aufgabentypen anzeigen
     const effectiveDay = task.postponedTo !== undefined && task.postponedTo !== null
       ? task.postponedTo : task.dayIndex;
     if (effectiveDay === wd) {

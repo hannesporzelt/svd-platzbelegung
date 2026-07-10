@@ -1565,6 +1565,9 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
 
   const fieldShort = { p1: "P1", p2: "P2", p3: "P3" };
   const zoneShort = { p2_voll: "ganz", h_ob: "Ob", h_ha: "Ha", v1: "V1", v2: "V2", v3: "V3", v4: "V4", h1: "H1", h2: "H2", voll: "" };
+  const MAEH_COLORS = { p1: { color: "#15803d", bg: "#dcfce7" }, p2: { color: "#0369a1", bg: "#dbeafe" }, p3: { color: "#92400e", bg: "#fef3c7" } };
+  const MAEH_NAMES = { p1: "P1", p2: "P2", p3: "P3" };
+  const TYPE_ICO2 = { "mähen": "🌿", "striegeln": "🪮", "beides": "🌿🪮", "duengen": "🧪", "sonstiges": "📝" };
 
   const delEntry = (e) => {
     if (e.auto || !e.id) return;
@@ -1574,104 +1577,165 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
     }
   };
 
+  // Handy: schmale Bildschirme bekommen eine Listenansicht statt des engen Rasters
+  const isMobile = useIsMobile();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthDays = React.useMemo(
+    () => Array.from({ length: daysInMonth }, (_, i) => new Date(year, month, i + 1)),
+    [year, month, daysInMonth]
+  );
+  const todayRef = useRef(null);
+  React.useEffect(() => {
+    if (isMobile && todayRef.current) {
+      todayRef.current.scrollIntoView({ block: "center" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile, year, month]);
+  const scrollToToday = () => {
+    requestAnimationFrame(() => todayRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }));
+  };
+
+  // Alle Zusatzinfos für einen Tag an einer Stelle berechnen (für Raster + Liste gleich)
+  const computeDayMeta = (d) => {
+    const wd = WEEKDAYS[(d.getDay() + 6) % 7];
+    const p1on = irrDays.p1.includes(wd);
+    const p2on = irrDays.p2.includes(wd);
+    const holiday = feiertagAn(d);
+    const ferien = !holiday && ferienAn(d);
+    const anyLock = ["p1", "p2", "p3"].map((f) => lockForDayField(d, f)).filter(Boolean);
+    const dk = dayKey(d);
+    const maehEntries = maehDays[dk] || [];
+    const noteText = notes && notes[dk]?.text;
+    const entries = entriesForDay(d).slice().sort((a, b) => a.start.localeCompare(b.start));
+    const isEmpty = entries.length === 0 && !p1on && !p2on && !holiday && !ferien && anyLock.length === 0 && maehEntries.length === 0 && !noteText;
+    return { p1on, p2on, holiday, ferien, anyLock, maehEntries, noteText, entries, isEmpty };
+  };
+
+  const renderBadges = (meta, size = 8.5) => (
+    <>
+      {(meta.p1on || meta.p2on) && (
+        <div style={{ display: "flex", gap: 3, marginBottom: 2 }} title="Beregnung">
+          {meta.p1on && <span style={{ fontSize: size, color: "#0f6e3e", background: "#e3f1ea", borderRadius: 4, padding: "0 3px", fontWeight: 600 }}>💧P1</span>}
+          {meta.p2on && <span style={{ fontSize: size, color: "#1d6fb8", background: "#e4eef8", borderRadius: 4, padding: "0 3px", fontWeight: 600 }}>💧P2</span>}
+        </div>
+      )}
+      {meta.holiday && <div style={{ fontSize: size, color: "#7a3f00", background: "#ffe8cc", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, overflowWrap: "anywhere" }} title="Feiertag">{meta.holiday}</div>}
+      {meta.ferien && <div style={{ fontSize: size, color: "#1d6b4f", background: "#e1f3ea", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, overflowWrap: "anywhere" }} title="Schulferien">{meta.ferien}</div>}
+      {meta.anyLock.length > 0 && <div style={{ fontSize: size + 0.5, color: C.danger, marginBottom: 2 }}>⛔ gesperrt</div>}
+      {meta.maehEntries.length > 0 && (
+        <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginBottom: 2 }}>
+          {meta.maehEntries.map(({ fieldId: fid, persons, done, taskType }, i) => {
+            const besetzt = persons && persons.length > 0;
+            const c = MAEH_COLORS[fid] || { color: "#15803d", bg: "#dcfce7" };
+            const icon = TYPE_ICO2[taskType] || "🌿";
+            return (
+              <span key={i} style={{ fontSize: size - 0.5, color: c.color,
+                background: besetzt ? c.bg : "transparent",
+                borderRadius: 3, padding: "0 3px", fontWeight: 600,
+                border: `1px ${besetzt ? "solid" : "dashed"} ${c.color}`,
+                opacity: done ? 0.5 : 1 }}
+                title={besetzt ? `${icon} ${MAEH_NAMES[fid]}: ${persons.join(", ")}` : `${icon} ${MAEH_NAMES[fid]}: offen`}>
+                {icon}{MAEH_NAMES[fid]}{besetzt ? "✓" : "?"}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {meta.noteText && (
+        <div style={{ fontSize: size, color: "#7a5d00", background: "#fff8e1", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.25, overflowWrap: "anywhere", wordBreak: "break-word" }} title={meta.noteText}>
+          📝 {meta.noteText}
+        </div>
+      )}
+    </>
+  );
+
+  const renderEntries = (entries, { fontSize = 10, maxShow = 5 } = {}) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {entries.slice(0, maxShow).map((e) => {
+        const t = teamById(e.team);
+        const deletable = isAdmin && removeBooking && !e.auto && e.id;
+        return (
+          <div key={e.id}
+            onClick={deletable ? () => delEntry(e) : undefined}
+            title={deletable ? "Löschen" : undefined}
+            style={{ display: "flex", alignItems: "flex-start", gap: 4, fontSize, lineHeight: 1.3, cursor: deletable ? "pointer" : "default" }}>
+            <span style={{ width: fontSize < 12 ? 7 : 9, height: fontSize < 12 ? 7 : 9, borderRadius: 2, background: t ? t.color : C.textSec, flex: "none", marginTop: 3 }} />
+            <span style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>
+              {e.start} {t ? t.name : e.team} <span style={{ color: C.textSec }}>{fieldShort[e.field]}{zoneShort[e.zone] ? "·" + zoneShort[e.zone] : ""}</span>
+              {deletable && <span className="no-print" style={{ color: C.danger }}> ✕</span>}
+            </span>
+          </div>
+        );
+      })}
+      {entries.length > maxShow && <div style={{ fontSize: fontSize - 1, color: C.textSec }}>+{entries.length - maxShow} weitere</div>}
+    </div>
+  );
+
   return (
     <div style={S.card} className="print-area">
       <div style={S.gridHead}>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }} className="no-print">
           <button style={S.navBtn} onClick={() => shiftMonth(-1)}>‹</button>
-          <button style={S.navBtn} onClick={toThisMonth}>Heute</button>
+          <button style={S.navBtn} onClick={() => { toThisMonth(); scrollToToday(); }}>Heute</button>
           <button style={S.navBtn} onClick={() => shiftMonth(1)}>›</button>
         </div>
         <span style={{ fontSize: 18 }}>{MONTHS_LONG[month]} {year}</span>
       </div>
       {isAdmin && <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }} className="no-print">Als Platzwart auf einen Eintrag tippen, um ihn zu löschen.</p>}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
-        {WEEKDAYS.map((w) => (
-          <div key={w} style={{ fontWeight: 600, fontSize: 12, textAlign: "center", padding: "4px 0", color: C.textSec }}>{w}</div>
-        ))}
-        {shownCells.map((d) => {
-          const inMonth = d.getMonth() === month;
-          const today = dayKey(d) === dayKey(new Date());
-          const entries = entriesForDay(d).slice().sort((a, b) => a.start.localeCompare(b.start));
-          const anyLock = ["p1", "p2", "p3"].map((f) => lockForDayField(d, f)).filter(Boolean);
-          return (
-            <div key={dayKey(d)} style={{
-              border: `1px solid ${C.border}`, borderRadius: 8, minHeight: 92, padding: 5,
-              background: inMonth ? (today ? "#eef7f0" : C.surface) : "#f5f4ef",
-              opacity: inMonth ? 1 : 0.55,
-            }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3, color: today ? C.brand : C.ink }}>{d.getDate()}</div>
-              {(() => {
-                const wd = WEEKDAYS[(d.getDay() + 6) % 7];
-                const p1on = irrDays.p1.includes(wd);
-                const p2on = irrDays.p2.includes(wd);
-                if (!p1on && !p2on) return null;
-                return (
-                  <div style={{ display: "flex", gap: 3, marginBottom: 2 }} title="Beregnung">
-                    {p1on && <span style={{ fontSize: 8.5, color: "#0f6e3e", background: "#e3f1ea", borderRadius: 4, padding: "0 3px", fontWeight: 600 }}>💧P1</span>}
-                    {p2on && <span style={{ fontSize: 8.5, color: "#1d6fb8", background: "#e4eef8", borderRadius: 4, padding: "0 3px", fontWeight: 600 }}>💧P2</span>}
-                  </div>
-                );
-              })()}
-              {feiertagAn(d) && <div style={{ fontSize: 8.5, color: "#7a3f00", background: "#ffe8cc", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, overflowWrap: "anywhere" }} title="Feiertag">{feiertagAn(d)}</div>}
-              {!feiertagAn(d) && ferienAn(d) && <div style={{ fontSize: 8.5, color: "#1d6b4f", background: "#e1f3ea", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, overflowWrap: "anywhere" }} title="Schulferien">{ferienAn(d)}</div>}
-              {anyLock.length > 0 && <div style={{ fontSize: 9, color: C.danger, marginBottom: 2 }}>⛔ gesperrt</div>}
-              {(() => {
-                const dk2 = dayKey(d);
-                const maehEntries = maehDays[dk2] || [];
-                if (maehEntries.length === 0) return null;
-                const MAEH_COLORS = { p1: { color: "#15803d", bg: "#dcfce7" }, p2: { color: "#0369a1", bg: "#dbeafe" }, p3: { color: "#92400e", bg: "#fef3c7" } };
-                const MAEH_NAMES = { p1: "P1", p2: "P2", p3: "P3" };
-                return (
-                  <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginBottom: 2 }}>
-                    {maehEntries.map(({ fieldId: fid, persons, done, taskType }, i) => {
-                      const besetzt = persons && persons.length > 0;
-                      const c = MAEH_COLORS[fid] || { color: "#15803d", bg: "#dcfce7" };
-                      const TYPE_ICO2 = { "mähen": "🌿", "striegeln": "🪮", "beides": "🌿🪮", "duengen": "🧪", "sonstiges": "📝" };
-                      const icon = TYPE_ICO2[taskType] || "🌿";
-                      return (
-                        <span key={i} style={{ fontSize: 8, color: c.color,
-                          background: besetzt ? c.bg : "transparent",
-                          borderRadius: 3, padding: "0 3px", fontWeight: 600,
-                          border: `1px ${besetzt ? "solid" : "dashed"} ${c.color}`,
-                          opacity: done ? 0.5 : 1 }}
-                          title={besetzt ? `${icon} ${MAEH_NAMES[fid]}: ${persons.join(", ")}` : `${icon} ${MAEH_NAMES[fid]}: offen`}>
-                          {icon}{MAEH_NAMES[fid]}{besetzt ? "✓" : "?"}
-                        </span>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-              {notes && notes[dayKey(d)]?.text && (
-                <div style={{ fontSize: 9, color: "#7a5d00", background: "#fff8e1", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.25, overflowWrap: "anywhere", wordBreak: "break-word" }} title={notes[dayKey(d)].text}>
-                  📝 {notes[dayKey(d)].text}
+      {isMobile ? (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {monthDays.map((d) => {
+            const meta = computeDayMeta(d);
+            const today = dayKey(d) === dayKey(new Date());
+            const wdLong = WEEKDAYS_LONG[(d.getDay() + 6) % 7];
+            if (meta.isEmpty) {
+              return (
+                <div key={dayKey(d)} ref={today ? todayRef : undefined}
+                  style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "5px 4px",
+                    borderBottom: `1px solid ${C.border}`, opacity: 0.55 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: today ? C.brand : C.textSec, width: 24, flex: "none" }}>{d.getDate()}.</span>
+                  <span style={{ fontSize: 11, color: C.textSec }}>{wdLong}{today ? " · heute" : ""}</span>
                 </div>
-              )}
-              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {entries.slice(0, 5).map((e) => {
-                  const t = teamById(e.team);
-                  const deletable = isAdmin && removeBooking && !e.auto && e.id;
-                  return (
-                    <div key={e.id}
-                      onClick={deletable ? () => delEntry(e) : undefined}
-                      title={deletable ? "Löschen" : undefined}
-                      style={{ display: "flex", alignItems: "flex-start", gap: 4, fontSize: 10, lineHeight: 1.25, cursor: deletable ? "pointer" : "default" }}>
-                      <span style={{ width: 7, height: 7, borderRadius: 2, background: t ? t.color : C.textSec, flex: "none", marginTop: 3 }} />
-                      <span style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>
-                        {e.start} {t ? t.name : e.team} <span style={{ color: C.textSec }}>{fieldShort[e.field]}{zoneShort[e.zone] ? "·" + zoneShort[e.zone] : ""}</span>
-                        {deletable && <span className="no-print" style={{ color: C.danger }}> ✕</span>}
-                      </span>
-                    </div>
-                  );
-                })}
-                {entries.length > 5 && <div style={{ fontSize: 9, color: C.textSec }}>+{entries.length - 5} weitere</div>}
+              );
+            }
+            return (
+              <div key={dayKey(d)} ref={today ? todayRef : undefined}
+                style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", marginBottom: 6,
+                  background: today ? "#eef7f0" : C.surface }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: today ? C.brand : C.ink }}>{d.getDate()}.</span>
+                  <span style={{ fontSize: 12, color: C.textSec }}>{wdLong}{today ? " · heute" : ""}</span>
+                </div>
+                {renderBadges(meta, 10)}
+                {renderEntries(meta.entries, { fontSize: 13, maxShow: 8 })}
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+          {WEEKDAYS.map((w) => (
+            <div key={w} style={{ fontWeight: 600, fontSize: 12, textAlign: "center", padding: "4px 0", color: C.textSec }}>{w}</div>
+          ))}
+          {shownCells.map((d) => {
+            const inMonth = d.getMonth() === month;
+            const today = dayKey(d) === dayKey(new Date());
+            const meta = computeDayMeta(d);
+            return (
+              <div key={dayKey(d)} style={{
+                border: `1px solid ${C.border}`, borderRadius: 8, minHeight: 92, padding: 5,
+                background: inMonth ? (today ? "#eef7f0" : C.surface) : "#f5f4ef",
+                opacity: inMonth ? 1 : 0.55,
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3, color: today ? C.brand : C.ink }}>{d.getDate()}</div>
+                {renderBadges(meta, 8.5)}
+                {renderEntries(meta.entries, { fontSize: 10, maxShow: 5 })}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: "4px 12px", fontSize: 11, color: C.textSec }}>
         {TEAMS.map((t) => (

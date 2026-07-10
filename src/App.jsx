@@ -401,7 +401,7 @@ export default function App() {
 
   // Vorstand-Bereich öffnen: nur echte Admins; sonst Login-Maske.
   const requestVorstand = () => {
-    if (isVorstand) { setView("dashboard"); return; }
+    if (isVorstand) { setView("vorstand"); return; }
     setShowLogin(true);
   };
 

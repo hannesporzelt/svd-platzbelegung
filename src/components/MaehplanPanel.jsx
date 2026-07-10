@@ -16,26 +16,35 @@ import { dayKey } from "../lib/domain";
 // ── Hilfsstile ────────────────────────────────────────────────────────
 const mp = {
   card: (light, border) => ({
-    background: light, border: `1px solid ${border}`,
+    background: "var(--c-surface, " + light + ")", border: `1px solid ${border}`,
     borderRadius: 12, padding: 14, marginBottom: 14,
   }),
   taskRow: (done, accent) => ({
-    border: `1px solid ${done ? "#d1fae5" : "#e5e7eb"}`,
+    border: `1px solid ${done ? "#10b981" : C.border}`,
     borderLeft: `4px solid ${done ? "#10b981" : accent}`,
     borderRadius: 8, padding: "10px 12px", marginBottom: 8,
-    background: done ? "#f0fdf4" : "#fff", opacity: done ? 0.75 : 1,
+    background: C.surface, opacity: done ? 0.75 : 1,
   }),
   personTag: {
     display: "inline-flex", alignItems: "center", gap: 4,
-    background: "#e5e7eb", borderRadius: 20, padding: "2px 8px",
+    background: C.surface, border: `1px solid ${C.border}`,
+    color: C.ink,
+    borderRadius: 20, padding: "2px 8px",
     fontSize: 12, marginRight: 4, marginBottom: 4,
   },
-  btn: { border: `1px solid ${C.border}`, background: "#fff", color: C.ink,
-    borderRadius: 8, padding: "5px 10px", cursor: "pointer", fontSize: 12 },
+  btn: {
+    border: `1px solid ${C.border}`,
+    background: C.surface,
+    color: C.ink,
+    borderRadius: 8, padding: "5px 10px", cursor: "pointer", fontSize: 12,
+  },
   okBtn: { border: "none", background: "#10b981", color: "#fff",
     borderRadius: 8, padding: "5px 10px", cursor: "pointer", fontSize: 12, fontWeight: 600 },
-  delBtn: { border: "none", background: "#fef2f2", color: "#dc2626",
-    borderRadius: 8, padding: "5px 10px", cursor: "pointer", fontSize: 12 },
+  delBtn: {
+    border: `1px solid #fca5a5`,
+    background: "var(--c-danger-bg, #fef2f2)", color: "#dc2626",
+    borderRadius: 8, padding: "5px 10px", cursor: "pointer", fontSize: 12,
+  },
   hint: (bg, border, color) => ({
     fontSize: 12, background: bg, color: color || C.textSec,
     border: `1px solid ${border}`, borderRadius: 8,
@@ -130,7 +139,7 @@ function TaskCard({ fieldId, task, accent, canEdit, mpHooks, weather, signups, k
           )}
         </div>
         <button onClick={() => mpHooks.toggleDone(fieldId, task.id)}
-          style={{ ...mp.btn, background: task.done ? "#10b981" : "#fff",
+          style={{ ...mp.btn, background: task.done ? "#10b981" : C.surface,
             color: task.done ? "#fff" : C.textSec, minWidth: 32 }}>
           {task.done ? "✓" : "○"}
         </button>
@@ -153,7 +162,7 @@ function TaskCard({ fieldId, task, accent, canEdit, mpHooks, weather, signups, k
               await mpHooks.saveTasks(fieldId, tasks);
             }}
             style={{ ...mp.btn, fontSize: 11,
-              background: task.type === t ? "#15803d" : "#fff",
+              background: task.type === t ? "#15803d" : C.surface,
               color: task.type === t ? "#fff" : C.ink,
               borderColor: task.type === t ? "#15803d" : C.border }}>
               {icon}
@@ -210,7 +219,7 @@ function TaskCard({ fieldId, task, accent, canEdit, mpHooks, weather, signups, k
             {WEEKDAYS_MP.slice(0, 6).map((wd, i) => (
               <button key={i} onClick={() => mpHooks.setFreeDay(fieldId, task.id, i)}
                 style={{ ...mp.btn,
-                  background: effectiveDay === i ? accent : "#fff",
+                  background: effectiveDay === i ? accent : C.surface,
                   color: effectiveDay === i ? "#fff" : C.ink,
                   borderColor: effectiveDay === i ? accent : C.border }}>
                 {wd}
@@ -232,14 +241,14 @@ function TaskCard({ fieldId, task, accent, canEdit, mpHooks, weather, signups, k
               )}
             </div>
           ) : (
-            <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb",
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`,
               borderRadius: 8, padding: 10, marginTop: 6 }}>
               <div style={{ fontSize: 12, color: C.textSec, marginBottom: 6 }}>Auf welchen Tag?</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
                 {WEEKDAYS_MP.slice(0, 6).map((wd, i) => (
                   <button key={i} onClick={() => setPostponeDay(i)}
                     style={{ ...mp.btn,
-                      background: postponeDay === i ? accent : "#fff",
+                      background: postponeDay === i ? accent : C.surface,
                       color: postponeDay === i ? "#fff" : C.ink,
                       borderColor: postponeDay === i ? accent : C.border }}>
                     {wd}
@@ -328,7 +337,7 @@ function TaskCard({ fieldId, task, accent, canEdit, mpHooks, weather, signups, k
                         KW {wk.week} ({monday(wk)}):
                       </span>
                       {wkSignups.map(s => (
-                        <span key={s.id} style={{ background: "#dcfce7", color: "#15803d",
+                        <span key={s.id} style={{ background: "#dcfce7", color: "#15803d", border: "1px solid #86efac",
                           borderRadius: 10, padding: "1px 8px", fontSize: 11,
                           display: "inline-flex", alignItems: "center", gap: 4 }}>
                           👤 {s.person}
@@ -347,7 +356,7 @@ function TaskCard({ fieldId, task, accent, canEdit, mpHooks, weather, signups, k
 
             {/* Vormerkung eintragen */}
             {signupOpen && (
-              <div style={{ marginTop: 8, background: "#f0fdf4", border: "1px solid #bbf7d0",
+              <div style={{ marginTop: 8, background: "var(--c-soft, #f0fdf4)", border: "1px solid #bbf7d0",
                 borderRadius: 8, padding: 10 }}>
                 <div style={{ fontSize: 12, color: C.textSec, marginBottom: 6 }}>
                   Name eintragen, dann Woche wählen:
@@ -368,7 +377,7 @@ function TaskCard({ fieldId, task, accent, canEdit, mpHooks, weather, signups, k
                         onClick={() => handleSignup(wk)}
                         disabled={!signupName.trim() || !!alreadyMe}
                         style={{ ...mp.btn, fontSize: 11,
-                          background: alreadyMe ? "#dcfce7" : "#fff",
+                          background: alreadyMe ? "#dcfce7" : C.surface,
                           color: alreadyMe ? "#15803d" : C.ink,
                           opacity: (!signupName.trim()) ? 0.5 : 1 }}>
                         {alreadyMe ? "✓ " : ""}KW {wk.week} ({monday(wk)})
@@ -549,7 +558,7 @@ function MonatskalenderTab({ homeGames, worklog, maintenance, kw, plan, signups 
             <div key={i} style={{
               minHeight: 70, padding: 4, borderRadius: 6,
               border: `1px solid ${isToday ? "#15803d" : "#e5e7eb"}`,
-              background: isToday ? "#f0fdf4" : inMonth ? "#fff" : "#f9fafb",
+              background: isToday ? "var(--c-brand-soft, #f0fdf4)" : inMonth ? C.surface : "var(--c-bg-muted, #f9fafb)",
               opacity: inMonth ? 1 : 0.5,
             }}>
               <div style={{ fontSize: 11, fontWeight: isToday ? 700 : 400,
@@ -568,7 +577,7 @@ function MonatskalenderTab({ homeGames, worklog, maintenance, kw, plan, signups 
                 const NAMES = { p1: "P1", p2: "P2", p3: "P3" };
                 return (
                   <div key={fid} style={{ fontSize: 9,
-                    background: done ? "#e5e7eb" : besetzt ? c.bg : "transparent",
+                    background: done ? C.surface : besetzt ? c.bg : "transparent",
                     color: done ? "#6b7280" : c.color,
                     border: `1px ${besetzt || done ? "solid" : "dashed"} ${c.border}`,
                     borderRadius: 3, padding: "1px 3px", marginBottom: 2,
@@ -615,7 +624,7 @@ function MonatskalenderTab({ homeGames, worklog, maintenance, kw, plan, signups 
       {/* Legende */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap",
         marginTop: 10, fontSize: 11, color: C.textSec }}>
-        <span><span style={{ background: "#dcfce7", color: "#15803d",
+        <span><span style={{ background: "#dcfce7", color: "#15803d", border: "1px solid #86efac",
           border: "1px solid #86efac", borderRadius: 3, padding: "0 4px" }}>🌿P1</span> Mähen geplant</span>
         <span><span style={{ background: "transparent", color: "#15803d",
           border: "1px dashed #86efac", borderRadius: 3, padding: "0 4px" }}>🌿P1 offen</span> noch offen</span>
@@ -682,7 +691,7 @@ function AuswertungTab({ worklog, maintenance, archive, kw, mpHooks, isPlatzwart
       <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
         {[["month", "Dieser Monat"], ["all", "Alles"]].map(([k, l]) => (
           <button key={k} onClick={() => setEvalPeriod(k)}
-            style={{ ...mp.btn, background: evalPeriod === k ? "#15803d" : "#fff",
+            style={{ ...mp.btn, background: evalPeriod === k ? "#15803d" : C.surface,
               color: evalPeriod === k ? "#fff" : C.ink,
               borderColor: evalPeriod === k ? "#15803d" : C.border }}>
             {l}
@@ -817,7 +826,7 @@ function PflegeTab({ maintenance, mpHooks, isPlatzwart }) {
     <div>
       {isPlatzwart && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 10,
-          padding: 12, marginBottom: 16, background: "#fafaf7" }}>
+          padding: 12, marginBottom: 16, background: C.surface }}>
           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 10 }}>
             Maßnahme eintragen
           </div>
@@ -951,7 +960,7 @@ function ProtokollTab({ worklog, mpHooks, isPlatzwart }) {
       </div>
 
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 10,
-        padding: 12, marginBottom: 16, background: "#fafaf7" }}>
+        padding: 12, marginBottom: 16, background: C.surface }}>
         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Arbeit eintragen</div>
         <div style={S.formGrid}>
           {[
@@ -1083,7 +1092,7 @@ export default function MaehplanPanel({ isPlatzwart, bookings }) {
         {TABS.map(([k, l]) => (
           <button key={k} onClick={() => setActiveTab(k)}
             style={{ ...mp.btn, fontWeight: activeTab === k ? 700 : 400,
-              background: activeTab === k ? "#15803d" : "#fff",
+              background: activeTab === k ? "#15803d" : C.surface,
               color: activeTab === k ? "#fff" : C.ink,
               borderColor: activeTab === k ? "#15803d" : C.border }}>
             {l}

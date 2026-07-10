@@ -102,7 +102,8 @@ async function exportMonthPDF(monthAnchor, entriesForDay, irrDays) {
       if (t) { const col = hexToRgb(t.color); pdf.setFillColor(col.r, col.g, col.b); pdf.circle(x + 2, ey - 1, 0.7, "F"); }
       pdf.setTextColor(40, 40, 40);
       const z = zoneShort[e.zone] ? "·" + zoneShort[e.zone] : "";
-      let label = `${e.start} ${t ? t.name : e.team} ${fieldShort[e.field] || ""}${z}`;
+      const opp = e.kind === "match" && e.opponent ? ` vs. ${e.opponent}` : "";
+      let label = `${e.start} ${t ? t.name : e.team}${opp} ${fieldShort[e.field] || ""}${z}`;
       label = pdf.splitTextToSize(label, colW - 4)[0];
       pdf.text(label, x + 3.5, ey);
       ey += 2.7;
@@ -116,7 +117,9 @@ async function exportMonthPDF(monthAnchor, entriesForDay, irrDays) {
 }
 
 // Wochenplan als PDF (DIN A4 quer): 7 Tagesspalten mit den Einträgen.
-async function exportWeekPDF(weekDays, entriesForDay, irrDays) {
+// extras liefert Zusatzinfos (Notizen, Mähplan, Sperren) für die Symbol-Zeile, analog zum Monatsplan.
+async function exportWeekPDF(weekDays, entriesForDay, irrDays, extras = {}) {
+  const { notes, maehplan, maehSignups, maehKw, lockForDayField } = extras;
   let jsPDF;
   try {
     jsPDF = await loadJsPDF();
@@ -126,6 +129,8 @@ async function exportWeekPDF(weekDays, entriesForDay, irrDays) {
   }
   const fieldShort = { p1: "P1", p2: "P2", p3: "P3" };
   const zoneShort = { p2_voll: "ganz", h_ob: "Ob", h_ha: "Ha", v1: "V1", v2: "V2", v3: "V3", v4: "V4", h1: "H1", h2: "H2", voll: "" };
+  const MAEH_NAMES = { p1: "P1", p2: "P2", p3: "P3" };
+  const TYPE_SHORT = { "mähen": "Mähen", "striegeln": "Striegeln", "beides": "Mähen+Striegeln", "duengen": "Düngen", "sonstiges": "Sonstiges" };
 
   const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   const W = 297, H = 210, M = 8;
@@ -134,7 +139,9 @@ async function exportWeekPDF(weekDays, entriesForDay, irrDays) {
   const titleY = M + 4;
   const headTop = M + 8;
   const headH = 7;
-  const gridTop = headTop + headH;
+  const metaTop = headTop + headH;
+  const metaH = 9;
+  const gridTop = metaTop + metaH;
   const gridH = H - gridTop - M;
 
   const mon = weekDays[0], sun = weekDays[6];
@@ -146,21 +153,68 @@ async function exportWeekPDF(weekDays, entriesForDay, irrDays) {
   weekDays.forEach((d, i) => {
     const x = M + i * colW;
     const isToday = dayKey(d) === todayKeyStr;
+    const wd = WEEKDAYS[(d.getDay() + 6) % 7];
     // Kopf
     pdf.setFillColor(isToday ? 225 : 240, isToday ? 240 : 240, isToday ? 230 : 240);
     pdf.rect(x, headTop, colW, headH, "F");
     pdf.setDrawColor(200); pdf.rect(x, headTop, colW, headH, "S");
     pdf.setFont("helvetica", "bold"); pdf.setFontSize(8); pdf.setTextColor(40, 40, 40);
-    pdf.text(`${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}.`, x + 1.5, headTop + 4.8);
+    pdf.text(`${wd} ${d.getDate()}.${d.getMonth() + 1}.`, x + 1.5, headTop + 4.8);
     // Beregnungs-Markierung (P1 grün / P2 blau) rechts im Kopf
     if (irrDays) {
-      const wd = WEEKDAYS[(d.getDay() + 6) % 7];
       let mx = x + colW - 2;
       pdf.setFontSize(6.5); pdf.setFont("helvetica", "bold");
       if (irrDays.p2 && irrDays.p2.includes(wd)) { pdf.setTextColor(29, 111, 184); pdf.text("P2", mx, headTop + 4.6, { align: "right" }); mx -= 6; }
       if (irrDays.p1 && irrDays.p1.includes(wd)) { pdf.setTextColor(15, 110, 62); pdf.text("P1", mx, headTop + 4.6, { align: "right" }); }
     }
+
+    // Symbol-Zeile: Feiertag/Ferien, Sperren, Mähplan, Notiz – analog zum Monatsplan
+    pdf.setDrawColor(200); pdf.rect(x, metaTop, colW, metaH, "S");
+    const metaParts = [];
+    const holiday = feiertagAn(d);
+    const ferien = !holiday && ferienAn(d);
+    if (holiday) metaParts.push({ text: holiday, color: [122, 63, 0] });
+    if (ferien) metaParts.push({ text: ferien, color: [29, 107, 79] });
+    if (lockForDayField) {
+      const lockedFields = ["p1", "p2", "p3"].filter((f) => lockForDayField(d, f));
+      if (lockedFields.length > 0) metaParts.push({ text: `Gesperrt: ${lockedFields.map((f) => fieldShort[f]).join(",")}`, color: [190, 40, 40] });
+    }
+    if (maehplan) {
+      const wdIdx = (d.getDay() + 6) % 7;
+      const dkStr = dayKey(d);
+      ["p1", "p2", "p3"].forEach((fid) => {
+        if (!maehplan[fid]?.tasks) return;
+        maehplan[fid].tasks.forEach((task) => {
+          if (!task.type) return;
+          const effDay = task.postponedTo !== undefined ? task.postponedTo : task.dayIndex;
+          if (effDay !== wdIdx) return;
+          const status = getMaehStatusForDate(maehplan, fid, dkStr, maehSignups, maehKw);
+          const besetzt = status?.persons?.length > 0;
+          metaParts.push({
+            text: `${MAEH_NAMES[fid]} ${TYPE_SHORT[task.type] || task.type}${besetzt ? " ✓" : " offen"}`,
+            color: besetzt ? [21, 128, 61] : [130, 130, 130],
+          });
+        });
+      });
+    }
+    const noteText = notes && notes[dayKey(d)]?.text;
+    if (noteText) metaParts.push({ text: `Notiz: ${noteText}`, color: [122, 93, 0] });
+
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(6);
+    let my = metaTop + 2.6;
+    metaParts.slice(0, 3).forEach((p) => {
+      if (my > metaTop + metaH - 1) return;
+      pdf.setTextColor(p.color[0], p.color[1], p.color[2]);
+      pdf.text(pdf.splitTextToSize(p.text, colW - 3)[0], x + 1.5, my);
+      my += 2.5;
+    });
+    if (metaParts.length > 3 && my <= metaTop + metaH - 1) {
+      pdf.setTextColor(140, 140, 140);
+      pdf.text(`+${metaParts.length - 3} weitere`, x + 1.5, my);
+    }
+
     // Spaltenkörper
+    pdf.setDrawColor(200);
     pdf.rect(x, gridTop, colW, gridH, "S");
     const entries = entriesForDay(d).slice().sort((a, b) => a.start.localeCompare(b.start));
     let ey = gridTop + 5;
@@ -172,7 +226,7 @@ async function exportWeekPDF(weekDays, entriesForDay, irrDays) {
       pdf.setTextColor(30, 30, 30);
       const z = zoneShort[e.zone] ? "·" + zoneShort[e.zone] : "";
       const line1 = `${e.start} ${t ? t.name : e.team}`;
-      const line2 = `${fieldShort[e.field] || ""}${z}${e.kind === "match" ? " · Heimspiel" : e.kind === "turnier" ? " · Turnier" : ""}`;
+      const line2 = `${fieldShort[e.field] || ""}${z}${e.kind === "match" ? (e.opponent ? ` · vs. ${e.opponent}` : " · Heimspiel") : e.kind === "turnier" ? " · Turnier" : ""}`;
       pdf.text(pdf.splitTextToSize(line1, colW - 5)[0], x + 3.6, ey);
       ey += 3.1;
       if (ey <= gridTop + gridH - 3) { pdf.setTextColor(110, 110, 110); pdf.text(pdf.splitTextToSize(line2, colW - 5)[0], x + 3.6, ey); ey += 3.6; }
@@ -401,7 +455,7 @@ export default function App() {
         setCalMode={setCalMode}
         onPrint={() => window.print()}
         onPdf={() => exportMonthPDF(monthAnchor, entriesForDay, { p1: (irrigation?.p1?.days) || [], p2: (irrigation?.p2?.days) || [] })}
-        onWeekPdf={() => exportWeekPDF(days, entriesForDay, { p1: (irrigation?.p1?.days) || [], p2: (irrigation?.p2?.days) || [] })}
+        onWeekPdf={() => exportWeekPDF(days, entriesForDay, { p1: (irrigation?.p1?.days) || [], p2: (irrigation?.p2?.days) || [] }, { notes, maehplan, maehSignups, maehKw, lockForDayField })}
         theme={theme}
         setTheme={setTheme}
       />
@@ -1669,7 +1723,7 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
             style={{ display: "flex", alignItems: "flex-start", gap: 4, fontSize, lineHeight: 1.3, cursor: deletable ? "pointer" : "default" }}>
             <span style={{ width: fontSize < 12 ? 7 : 9, height: fontSize < 12 ? 7 : 9, borderRadius: 2, background: t ? t.color : C.textSec, flex: "none", marginTop: 3 }} />
             <span style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>
-              {e.start} {t ? t.name : e.team} <span style={{ color: C.textSec }}>{fieldShort[e.field]}{zoneShort[e.zone] ? "·" + zoneShort[e.zone] : ""}</span>
+              {e.start} {t ? t.name : e.team}{e.kind === "match" && e.opponent ? ` vs. ${e.opponent}` : ""} <span style={{ color: C.textSec }}>{fieldShort[e.field]}{zoneShort[e.zone] ? "·" + zoneShort[e.zone] : ""}</span>
               {deletable && <span className="no-print" style={{ color: C.danger }}> ✕</span>}
             </span>
           </div>

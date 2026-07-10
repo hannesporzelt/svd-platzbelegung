@@ -141,6 +141,44 @@ function TaskCard({ fieldId, task, accent, canEdit, mpHooks, weather, signups, k
           {task.note}
         </div>
       )}
+      {/* Typ-Auswahl für Platzwart */}
+      {canEdit && (
+        <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: C.textSec }}>Typ:</span>
+          {Object.entries(TYPE_ICONS).map(([t, icon]) => (
+            <button key={t} onClick={async () => {
+              const tasks = (mpHooks.plan?.[fieldId]?.tasks || []).map(tk =>
+                tk.id === task.id ? { ...tk, type: t } : tk
+              );
+              await mpHooks.saveTasks(fieldId, tasks);
+            }}
+            style={{ ...mp.btn, fontSize: 11,
+              background: task.type === t ? "#15803d" : "#fff",
+              color: task.type === t ? "#fff" : C.ink,
+              borderColor: task.type === t ? "#15803d" : C.border }}>
+              {icon}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* Sonstiges: Freitextfeld */}
+      {task.type === "sonstiges" && (
+        <div style={{ marginTop: 4 }}>
+          <input type="text"
+            defaultValue={task.note || ""}
+            onBlur={async e => {
+              const val = e.target.value.trim();
+              if (val === (task.note || "")) return;
+              const tasks = (mpHooks.plan?.[fieldId]?.tasks || []).map(tk =>
+                tk.id === task.id ? { ...tk, note: val } : tk
+              );
+              await mpHooks.saveTasks(fieldId, tasks);
+            }}
+            placeholder="Beschreibung eingeben…"
+            style={{ ...S.select, fontSize: 12, width: "100%", boxSizing: "border-box" }}
+          />
+        </div>
+      )}
 
       {/* Personen */}
       <div style={{ marginTop: 8 }}>
@@ -561,10 +599,12 @@ function MonatskalenderTab({ homeGames, worklog, maintenance, kw, plan, signups 
                 <div key={j} style={{ fontSize: 9,
                   background: m.done ? "#e5e7eb" : "#fef3c7",
                   color: m.done ? "#6b7280" : "#92400e",
+                  border: `1px solid ${m.done ? "#d1d5db" : "#fcd34d"}`,
                   borderRadius: 3, padding: "1px 3px",
                   marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis",
-                  whiteSpace: "nowrap" }}>
-                  {MAINTENANCE_TYPES[m.type]?.icon || "🔧"} {MAINTENANCE_TYPES[m.type]?.label || m.type}
+                  whiteSpace: "nowrap" }}
+                  title={`${MAINTENANCE_TYPES[m.type]?.label || m.type}${m.person ? " · " + m.person : ""}${m.note ? " · " + m.note : ""}`}>
+                  {MAINTENANCE_TYPES[m.type]?.icon || "🔧"} {m.done ? "✓" : ""}{MAINTENANCE_TYPES[m.type]?.label || m.type}
                 </div>
               ))}
             </div>
@@ -924,6 +964,8 @@ function ProtokollTab({ worklog, mpHooks, isPlatzwart }) {
               <option value="mähen">🌿 Mähen</option>
               <option value="striegeln">🪮 Striegeln</option>
               <option value="beides">🌿🪮 Mähen & Striegeln</option>
+              <option value="duengen">🧪 Düngen</option>
+              <option value="sonstiges">📝 Sonstiges</option>
             </select>],
             ["Datum", <input type="date" value={date}
               onChange={e => setDate(e.target.value)} style={S.select} />],

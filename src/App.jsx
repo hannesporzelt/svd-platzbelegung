@@ -1330,6 +1330,7 @@ const ADMIN_MENU = [
   ] },
   { group: "Pflege", items: [
     ["beregnung", "Beregnung"],
+    ["maehplan_pw", "Mähplan"],
   ] },
 ];
 const ADMIN_LABELS = ADMIN_MENU.reduce((acc, g) => { g.items.forEach(([k, l]) => { acc[k] = l; }); return acc; }, {});
@@ -1421,6 +1422,7 @@ function AdminPanel({ days, bookings, bookingsByDay, addBooking, addBookingSerie
       {tab === "trainingstage" && <TrainDayApproval bookings={bookings} setBookingStatus={setBookingStatus} approveSeries={approveSeries} moveBooking={moveBooking} removeBooking={removeBooking} removeSeries={removeSeries} addMessage={addMessage} />}
       {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} users={users} addMessage={addMessage} />}
       {tab === "beregnung" && <IrrigationPanel irrigation={irrigation} saveIrrigation={saveIrrigation} canEdit={canEditIrrigation} bookings={bookings} />}
+      {tab === "maehplan_pw" && <MaehplanPanel isPlatzwart={true} bookings={bookings} />}
       {tab === "v_nutzer" && isVorstand && (
         <UserManager users={users} saveUser={saveUser} setUserRole={setUserRole} setUserTeams={setUserTeams} setUserRights={setUserRights} removeUser={removeUser} isVorstand={isVorstand} changePin={changePin} />
       )}

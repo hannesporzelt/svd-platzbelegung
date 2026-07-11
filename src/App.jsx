@@ -4,10 +4,11 @@ import {
   dayKey, mondayOf, addDays, isoWeek, fmtRange, expandRecurrence, zoneCovers,
   autoTrainingForDay, findConflicts, conflictIdsForEntries, effectiveSpan, warmupBlockFor,
   zonesOverlap, timeOverlap,
-  buildIrrigationWindows, findIrrigationOverlaps, passDurationSec, kickoffToStart, computeMatchIrrigation, homeGamesFromIcs, icsGamesToBookings,
+  buildIrrigationWindows, findIrrigationOverlaps, passDurationSec, kickoffToStart, computeMatchIrrigation,
+  homeGamesFromIcs, icsGamesToBookings, awayGamesFromIcs, icsGamesToAwayGames,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
-import { useBookings, useLocks, useMessages, useUsers, useNotes, useIrrigation } from "./lib/data";
+import { useBookings, useAwayGames, useLocks, useMessages, useUsers, useNotes, useIrrigation } from "./lib/data";
 import { C, S } from "./lib/styles";
 import { ferienAn, feiertagAn } from "./lib/feiertage";
 import Pitch from "./components/Pitch";
@@ -32,7 +33,8 @@ function loadJsPDF() {
 }
 
 // Monatsplan als PDF erzeugen (DIN A4 quer), als Kalenderraster gezeichnet.
-async function exportMonthPDF(monthAnchor, entriesForDay, irrDays) {
+async function exportMonthPDF(monthAnchor, entriesForDay, irrDays, extras = {}) {
+  const { awayGamesForDay } = extras;
   let jsPDF;
   try {
     jsPDF = await loadJsPDF();
@@ -92,12 +94,22 @@ async function exportMonthPDF(monthAnchor, entriesForDay, irrDays) {
       if (irrDays.p2 && irrDays.p2.includes(wd)) { pdf.setTextColor(29, 111, 184); pdf.text("P2", mx, y + 4, { align: "right" }); mx -= 5; }
       if (irrDays.p1 && irrDays.p1.includes(wd)) { pdf.setTextColor(15, 110, 62); pdf.text("P1", mx, y + 4, { align: "right" }); }
     }
-    // Einträge
+    // Einträge (Heimspiele/Belegungen + Auswärtsspiele zusammen, nach Uhrzeit sortiert)
     const entries = entriesForDay(d).slice().sort((a, b) => a.start.localeCompare(b.start));
+    const away = (awayGamesForDay ? awayGamesForDay(d) : []).map((g) => ({ ...g, _away: true }));
+    const combined = [...entries, ...away].sort((a, b) => (a.start || "").localeCompare(b.start || ""));
     pdf.setFont("helvetica", "normal"); pdf.setFontSize(6.5);
     let ey = y + 8;
     const maxLines = Math.floor((rowH - 8) / 2.7);
-    entries.slice(0, maxLines).forEach((e) => {
+    combined.slice(0, maxLines).forEach((e) => {
+      if (e._away) {
+        pdf.setTextColor(91, 33, 182);
+        let label = `${e.start} Ausw.: ${teamById(e.team)?.name || e.team} bei ${e.opponent || "?"}`;
+        label = pdf.splitTextToSize(label, colW - 4)[0];
+        pdf.text(label, x + 3.5, ey);
+        ey += 2.7;
+        return;
+      }
       const t = teamById(e.team);
       if (t) { const col = hexToRgb(t.color); pdf.setFillColor(col.r, col.g, col.b); pdf.circle(x + 2, ey - 1, 0.7, "F"); }
       pdf.setTextColor(40, 40, 40);
@@ -108,8 +120,8 @@ async function exportMonthPDF(monthAnchor, entriesForDay, irrDays) {
       pdf.text(label, x + 3.5, ey);
       ey += 2.7;
     });
-    if (entries.length > maxLines) {
-      pdf.setTextColor(120); pdf.text(`+${entries.length - maxLines} weitere`, x + 3.5, ey);
+    if (combined.length > maxLines) {
+      pdf.setTextColor(120); pdf.text(`+${combined.length - maxLines} weitere`, x + 3.5, ey);
     }
   });
 
@@ -119,7 +131,7 @@ async function exportMonthPDF(monthAnchor, entriesForDay, irrDays) {
 // Wochenplan als PDF (DIN A4 quer): 7 Tagesspalten mit den Einträgen.
 // extras liefert Zusatzinfos (Notizen, Mähplan, Sperren) für die Symbol-Zeile, analog zum Monatsplan.
 async function exportWeekPDF(weekDays, entriesForDay, irrDays, extras = {}) {
-  const { notes, maehplan, maehSignups, maehKw, lockForDayField } = extras;
+  const { notes, maehplan, maehSignups, maehKw, lockForDayField, awayGamesForDay } = extras;
   let jsPDF;
   try {
     jsPDF = await loadJsPDF();
@@ -217,10 +229,21 @@ async function exportWeekPDF(weekDays, entriesForDay, irrDays, extras = {}) {
     pdf.setDrawColor(200);
     pdf.rect(x, gridTop, colW, gridH, "S");
     const entries = entriesForDay(d).slice().sort((a, b) => a.start.localeCompare(b.start));
+    const away = (awayGamesForDay ? awayGamesForDay(d) : []).map((g) => ({ ...g, _away: true }));
+    const combined = [...entries, ...away].sort((a, b) => (a.start || "").localeCompare(b.start || ""));
     let ey = gridTop + 5;
     pdf.setFont("helvetica", "normal"); pdf.setFontSize(7);
-    entries.forEach((e) => {
+    combined.forEach((e) => {
       if (ey > gridTop + gridH - 3) return;
+      if (e._away) {
+        pdf.setTextColor(91, 33, 182);
+        const line1 = `${e.start} Ausw.: ${teamById(e.team)?.name || e.team}`;
+        const line2 = `bei ${e.opponent || "?"}`;
+        pdf.text(pdf.splitTextToSize(line1, colW - 5)[0], x + 3.6, ey);
+        ey += 3.1;
+        if (ey <= gridTop + gridH - 3) { pdf.text(pdf.splitTextToSize(line2, colW - 5)[0], x + 3.6, ey); ey += 3.6; }
+        return;
+      }
       const t = teamById(e.team);
       if (t) { const col = hexToRgb(t.color); pdf.setFillColor(col.r, col.g, col.b); pdf.circle(x + 2, ey - 1.2, 0.8, "F"); }
       pdf.setTextColor(30, 30, 30);
@@ -231,7 +254,7 @@ async function exportWeekPDF(weekDays, entriesForDay, irrDays, extras = {}) {
       ey += 3.1;
       if (ey <= gridTop + gridH - 3) { pdf.setTextColor(110, 110, 110); pdf.text(pdf.splitTextToSize(line2, colW - 5)[0], x + 3.6, ey); ey += 3.6; }
     });
-    if (entries.length === 0) { pdf.setTextColor(150, 150, 150); pdf.text("frei", x + 3.6, gridTop + 5); }
+    if (combined.length === 0) { pdf.setTextColor(150, 150, 150); pdf.text("frei", x + 3.6, gridTop + 5); }
   });
 
   pdf.save(`Platzbelegung-Woche-${dayKey(mon)}.pdf`);
@@ -312,6 +335,11 @@ export default function App() {
   const isAdmin = isPlatzwart; // Kompatibilität: bestehender Code nutzt isAdmin = Platzwart-Rechte
   const [showLogin, setShowLogin] = useState(false);
   const { bookings, bookingsReady, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, importBookings } = useBookings();
+  const { awayGames, awayGamesReady, addAwayGame, removeAwayGame, importAwayGames } = useAwayGames();
+  const awayGamesForDay = (d) => {
+    const dk = dayKey(d);
+    return awayGames.filter((g) => g.date === dk).sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+  };
   const { locks, locksReady, addLock, removeLock } = useLocks();
   const { notes, notesReady, setNote } = useNotes();
   const { messages, messagesReady, addMessage, setMessageDone, removeMessage } = useMessages();
@@ -479,8 +507,8 @@ export default function App() {
         calMode={calMode}
         setCalMode={setCalMode}
         onPrint={() => window.print()}
-        onPdf={() => exportMonthPDF(monthAnchor, entriesForDay, { p1: (irrigation?.p1?.days) || [], p2: (irrigation?.p2?.days) || [] })}
-        onWeekPdf={() => exportWeekPDF(days, entriesForDay, { p1: (irrigation?.p1?.days) || [], p2: (irrigation?.p2?.days) || [] }, { notes, maehplan, maehSignups, maehKw, lockForDayField })}
+        onPdf={() => exportMonthPDF(monthAnchor, entriesForDay, { p1: (irrigation?.p1?.days) || [], p2: (irrigation?.p2?.days) || [] }, { awayGamesForDay })}
+        onWeekPdf={() => exportWeekPDF(days, entriesForDay, { p1: (irrigation?.p1?.days) || [], p2: (irrigation?.p2?.days) || [] }, { notes, maehplan, maehSignups, maehKw, lockForDayField, awayGamesForDay })}
         theme={theme}
         setTheme={setTheme}
       />
@@ -517,6 +545,7 @@ export default function App() {
 
       <TeamJumpSearch
         bookings={bookings}
+        awayGames={awayGames}
         calMode={calMode}
         setCalMode={setCalMode}
         setWeekStart={setWeekStart}
@@ -541,6 +570,7 @@ export default function App() {
           <WeekGrid
             days={days}
             entriesForDay={entriesForDay}
+            awayGamesForDay={awayGamesForDay}
             lockForDayField={lockForDayField}
             activeField={activeField}
             setActiveField={setActiveField}
@@ -575,6 +605,7 @@ export default function App() {
           monthAnchor={monthAnchor}
           setMonthAnchor={setMonthAnchor}
           entriesForDay={entriesForDay}
+          awayGamesForDay={awayGamesForDay}
           lockForDayField={lockForDayField}
           isAdmin={isAdmin}
           removeBooking={removeBooking}
@@ -624,6 +655,9 @@ export default function App() {
           moveBooking={moveBooking}
           removeBooking={removeBooking}
           removeSeries={removeSeries}
+          awayGames={awayGames}
+          addAwayGame={addAwayGame}
+          removeAwayGame={removeAwayGame}
           locks={locks}
           addLock={addLock}
           removeLock={removeLock}
@@ -644,6 +678,7 @@ export default function App() {
           saveIrrigation={saveIrrigation}
           canEditIrrigation={canEditIrrigation}
           importBookings={importBookings}
+          importAwayGames={importAwayGames}
         />
       )}
 
@@ -661,6 +696,7 @@ export default function App() {
           saveIrrigation={saveIrrigation}
           importBookings={importBookings}
           bookings={bookings}
+          importAwayGames={importAwayGames}
         />
       )}
 
@@ -1307,7 +1343,7 @@ function WeekNav({ weekStart, setWeekStart }) {
 }
 
 /* ---------------- Wochenraster ---------------- */
-function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove, notes, setNote, teamFilter, setTeamFilter, myTeams, irrigation, maehplan, maehSignups, maehKw }) {
+function WeekGrid({ days, entriesForDay, awayGamesForDay, lockForDayField, activeField, setActiveField, isAdmin, removeBooking, onMove, notes, setNote, teamFilter, setTeamFilter, myTeams, irrigation, maehplan, maehSignups, maehKw }) {
   const isMobile = useIsMobile();
   const todayIdx = days.findIndex((d) => dayKey(d) === dayKey(new Date()));
   const [dayIdx, setDayIdx] = useState(todayIdx >= 0 ? todayIdx : 0);
@@ -1373,6 +1409,12 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
                 <span style={{ fontWeight: 500 }}>{WEEKDAYS[(d.getDay() + 6) % 7]}</span>
                 <span style={{ color: C.textSec, fontSize: 12 }}>{d.getDate()}.{d.getMonth() + 1}.</span>
               </div>
+              {awayGamesForDay && awayGamesForDay(d).map((g) => (
+                <div key={g.id} style={{ fontSize: 10, color: "#5b21b6", background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 5, padding: "2px 5px", marginBottom: 4, fontWeight: 500, overflowWrap: "anywhere" }}
+                  title={g.venue ? `Ort: ${g.venue}` : undefined}>
+                  🚌 {g.start} {teamById(g.team)?.name || g.team} bei {g.opponent}
+                </div>
+              ))}
               {(() => {
                 const wd = WEEKDAYS[(d.getDay() + 6) % 7];
                 const p1on = irrDays.p1.includes(wd);
@@ -1505,14 +1547,14 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
 }
 
 // Textsuche nach Mannschaft/Gegner: zeigt die nächsten passenden Termine und springt per Klick dorthin.
-function TeamJumpSearch({ bookings, calMode, setCalMode, setWeekStart, setMonthAnchor, setView }) {
+function TeamJumpSearch({ bookings, awayGames, calMode, setCalMode, setWeekStart, setMonthAnchor, setView }) {
   const [q, setQ] = useState("");
   const todayKeyStr = dayKey(new Date());
 
   const results = React.useMemo(() => {
     const query = q.trim().toLowerCase();
     if (!query) return [];
-    return bookings
+    const home = bookings
       .filter((b) => b.status !== "beantragt" && b.date >= todayKeyStr)
       .filter((b) => {
         const t = teamById(b.team);
@@ -1520,10 +1562,21 @@ function TeamJumpSearch({ bookings, calMode, setCalMode, setWeekStart, setMonthA
         const opp = (b.opponent || "").toLowerCase();
         return name.includes(query) || opp.includes(query);
       })
-      .sort((a, b2) => (a.date + a.start).localeCompare(b2.date + b2.start))
+      .map((b) => ({ ...b, _away: false }));
+    const away = (awayGames || [])
+      .filter((g) => g.date >= todayKeyStr)
+      .filter((g) => {
+        const t = teamById(g.team);
+        const name = (t ? t.name : g.team || "").toLowerCase();
+        const opp = (g.opponent || "").toLowerCase();
+        return name.includes(query) || opp.includes(query);
+      })
+      .map((g) => ({ ...g, _away: true }));
+    return [...home, ...away]
+      .sort((a, b2) => (a.date + (a.start || "")).localeCompare(b2.date + (b2.start || "")))
       .slice(0, 8);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, bookings, todayKeyStr]);
+  }, [q, bookings, awayGames, todayKeyStr]);
 
   const jumpTo = (b) => {
     const d = new Date(b.date + "T12:00");
@@ -1555,9 +1608,10 @@ function TeamJumpSearch({ bookings, calMode, setCalMode, setWeekStart, setMonthA
             const t = teamById(b.team);
             const d = new Date(b.date + "T12:00");
             return (
-              <button key={b.id} onClick={() => jumpTo(b)}
+              <button key={(b._away ? "a-" : "h-") + b.id} onClick={() => jumpTo(b)}
                 style={{ display: "block", width: "100%", textAlign: "left", border: "none", borderBottom: `1px solid ${C.border}`, background: "transparent", cursor: "pointer", padding: "8px 10px", fontSize: 13 }}>
-                <strong>{d.getDate()}.{d.getMonth() + 1}.</strong> · {b.start} · {t ? t.name : b.team}{b.kind === "match" && b.opponent ? ` vs. ${b.opponent}` : ""}
+                <strong>{d.getDate()}.{d.getMonth() + 1}.</strong> · {b.start} · {t ? t.name : b.team}
+                {b._away ? ` bei ${b.opponent || "?"} (auswärts)` : (b.kind === "match" && b.opponent ? ` vs. ${b.opponent}` : "")}
               </button>
             );
           })}
@@ -1705,7 +1759,7 @@ function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockFor
 /* ---------------- Monatsübersicht (druckbar) ---------------- */
 const MONTHS_LONG = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 
-function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField, isAdmin, removeBooking, notes, setNote, irrigation, maehplan, maehSignups, maehKw }) {
+function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, awayGamesForDay, lockForDayField, isAdmin, removeBooking, notes, setNote, irrigation, maehplan, maehSignups, maehKw }) {
   const irrDays = {
     p1: (irrigation && irrigation.p1 && irrigation.p1.days) || [],
     p2: (irrigation && irrigation.p2 && irrigation.p2.days) || [],
@@ -1771,8 +1825,9 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
     const maehEntries = maehDays[dk] || [];
     const noteText = notes && notes[dk]?.text;
     const entries = entriesForDay(d).slice().sort((a, b) => a.start.localeCompare(b.start));
-    const isEmpty = entries.length === 0 && !p1on && !p2on && !holiday && !ferien && anyLock.length === 0 && maehEntries.length === 0 && !noteText;
-    return { p1on, p2on, holiday, ferien, anyLock, maehEntries, noteText, entries, isEmpty };
+    const away = (awayGamesForDay ? awayGamesForDay(d) : []).slice().sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+    const isEmpty = entries.length === 0 && away.length === 0 && !p1on && !p2on && !holiday && !ferien && anyLock.length === 0 && maehEntries.length === 0 && !noteText;
+    return { p1on, p2on, holiday, ferien, anyLock, maehEntries, noteText, entries, away, isEmpty };
   };
 
   const renderBadges = (meta, size = 8.5) => (
@@ -1810,6 +1865,12 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
           📝 {meta.noteText}
         </div>
       )}
+      {meta.away && meta.away.length > 0 && meta.away.map((g) => (
+        <div key={g.id} style={{ fontSize: size, color: "#5b21b6", background: "#f5f3ff", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, overflowWrap: "anywhere" }}
+          title={g.venue ? `Ort: ${g.venue}` : undefined}>
+          🚌 {g.start} {teamById(g.team)?.name || g.team} bei {g.opponent}
+        </div>
+      ))}
     </>
   );
 
@@ -1919,6 +1980,7 @@ const ADMIN_MENU = [
     ["belegung", "Belegung eintragen"],
     ["spiel", "Heimspiel"],
     ["turnier", "Turnier"],
+    ["auswaerts", "Auswärtsspiel"],
     ["sperre", "Platzsperre"],
   ] },
   { group: "Verwalten", items: [
@@ -1937,7 +1999,7 @@ const ADMIN_MENU = [
 ];
 const ADMIN_LABELS = ADMIN_MENU.reduce((acc, g) => { g.items.forEach(([k, l]) => { acc[k] = l; }); return acc; }, {});
 
-function AdminPanel({ initialTab, days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, canEditIrrigation, importBookings }) {
+function AdminPanel({ initialTab, days, bookings, bookingsByDay, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, awayGames, addAwayGame, removeAwayGame, locks, addLock, removeLock, addMessage, messages, setMessageDone, removeMessage, onMove, users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, canEditIrrigation, importBookings, importAwayGames }) {
   const [tab, setTab] = useState(initialTab || "belegung");
   // Wenn von außen (Dashboard/Schnellzugriff) ein bestimmter Tab angefordert wird, direkt dorthin springen
   React.useEffect(() => {
@@ -2034,7 +2096,10 @@ function AdminPanel({ initialTab, days, bookings, bookingsByDay, addBooking, add
         <UserManager users={users} saveUser={saveUser} setUserRole={setUserRole} setUserTeams={setUserTeams} setUserRights={setUserRights} removeUser={removeUser} isVorstand={isVorstand} changePin={changePin} />
       )}
       {tab === "v_kalender" && isVorstand && (
-        <CalendarImport irrigation={irrigation} saveIrrigation={saveIrrigation} canEdit={isVorstand} importBookings={importBookings} bookings={bookings} />
+        <CalendarImport irrigation={irrigation} saveIrrigation={saveIrrigation} canEdit={isVorstand} importBookings={importBookings} bookings={bookings} importAwayGames={importAwayGames} />
+      )}
+      {tab === "auswaerts" && (
+        <AwayGameManager awayGames={awayGames} addAwayGame={addAwayGame} removeAwayGame={removeAwayGame} />
       )}
       {tab === "v_maehplan" && isVorstand && (
         <MaehplanToggle irrigation={irrigation} saveIrrigation={saveIrrigation} />
@@ -2737,12 +2802,96 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
 }
 
 
-function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, bookings }) {
+// Manuelles Eintragen/Verwalten von Auswärtsspielen. Rein informativ: kein Platz,
+// keine Konfliktprüfung. Ergänzt die automatisch aus BFV-Kalendern importierten.
+function AwayGameManager({ awayGames, addAwayGame, removeAwayGame }) {
+  const [date, setDate] = useState("");
+  const [team, setTeam] = useState(TEAMS[0]?.id || "");
+  const [start, setStart] = useState("14:00");
+  const [opponent, setOpponent] = useState("");
+  const [venue, setVenue] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!date || !opponent.trim()) { setMsg({ t: "err", x: "Bitte Datum und Gegner angeben." }); return; }
+    setBusy(true);
+    try {
+      await addAwayGame({ date, team, start, opponent: opponent.trim(), venue: venue.trim() });
+      setMsg({ t: "ok", x: "Auswärtsspiel eingetragen." });
+      setOpponent(""); setVenue("");
+    } catch (e) {
+      setMsg({ t: "err", x: "Speichern fehlgeschlagen: " + (e.message || "") });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const upcoming = (awayGames || [])
+    .slice()
+    .sort((a, b) => (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
+
+  return (
+    <div style={S.card}>
+      <h3 style={{ marginTop: 0 }}>🚌 Auswärtsspiel eintragen</h3>
+      <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>
+        Rein informativ – belegt keinen Platz und wird nicht auf Überschneidungen geprüft.
+        Auswärtsspiele aus den hinterlegten BFV-Kalendern werden automatisch ergänzt (siehe „Spielplan-Kalender" im Vorstand-Bereich);
+        hier kannst du zusätzlich welche von Hand eintragen, z. B. Freundschaftsspiele ohne BFV-Kalender.
+      </p>
+      <div style={S.formGrid}>
+        <Field label="Datum"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={S.select} /></Field>
+        <Field label="Mannschaft">
+          <select value={team} onChange={(e) => setTeam(e.target.value)} style={S.select}>
+            {TEAMS.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Anstoß"><input type="time" value={start} onChange={(e) => setStart(e.target.value)} style={S.select} /></Field>
+        <Field label="Gegner">
+          <input type="text" placeholder="z. B. TSV Musterdorf" value={opponent} onChange={(e) => setOpponent(e.target.value)} style={S.select} />
+        </Field>
+        <Field label="Ort (optional)">
+          <input type="text" placeholder="Sportplatz, Ort" value={venue} onChange={(e) => setVenue(e.target.value)} style={S.select} />
+        </Field>
+      </div>
+      {msg && <p style={{ color: msg.t === "err" ? C.danger : "#15803d", fontSize: 13 }}>{msg.x}</p>}
+      <button style={{ ...S.primaryBtn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={submit}>
+        {busy ? "Speichert…" : "Eintragen"}
+      </button>
+
+      <h4 style={{ marginTop: 20 }}>Kommende Auswärtsspiele</h4>
+      {upcoming.length === 0 && <p style={{ fontSize: 13, color: C.textSec }}>Keine eingetragen.</p>}
+      <div>
+        {upcoming.map((g) => {
+          const d = new Date(g.date + "T12:00");
+          const t = teamById(g.team);
+          return (
+            <div key={g.id} style={S.listRow}>
+              <span>
+                <b>{d.getDate()}.{d.getMonth() + 1}.</b> · {g.start} · {t ? t.name : g.team} bei <b>{g.opponent}</b>
+                {g.venue && <span style={{ color: C.textSec }}> · {g.venue}</span>}
+                {g.source === "bfv" && <span style={{ color: C.textSec, fontSize: 11 }}> · BFV-Import</span>}
+              </span>
+              <button
+                onClick={() => { if (window.confirm("Auswärtsspiel wirklich löschen?")) removeAwayGame(g.id); }}
+                style={{ border: "none", background: "transparent", color: C.danger, cursor: "pointer", fontSize: 13 }}>
+                ✕
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, bookings, importAwayGames }) {
   const saved = (irrigation && irrigation._calendars) || {};
   const [cals, setCals] = useState(Array.isArray(saved.list) ? saved.list : []);
   const [newUrl, setNewUrl] = useState("");
   const [newTeam, setNewTeam] = useState(TEAMS[0]?.id || "");
   const [games, setGames] = useState([]);
+  const [awayGamesFound, setAwayGamesFound] = useState([]);
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -2763,22 +2912,33 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
     autoRanRef.current = true;
     (async () => {
       try {
-        setAutoMsg("Heimspiele werden automatisch abgeglichen…");
+        setAutoMsg("Spielplan wird automatisch abgeglichen…");
         const today = dayKey(new Date());
-        const all = [];
+        const allHome = [];
+        const allAway = [];
         for (const c of list) {
           try {
             const resp = await fetch("/api/bfv-ical?url=" + encodeURIComponent(c.url));
             if (!resp.ok) continue;
             const text = await resp.text();
-            homeGamesFromIcs(text, today).forEach((g) => all.push({ ...g, team: c.team }));
+            homeGamesFromIcs(text, today).forEach((g) => allHome.push({ ...g, team: c.team }));
+            awayGamesFromIcs(text, today).forEach((g) => allAway.push({ ...g, team: c.team }));
           } catch { /* einzelnen Kalender überspringen */ }
         }
-        if (all.length === 0) { setAutoMsg(null); return; }
-        const newBookings = [];
-        all.forEach((g) => icsGamesToBookings([g], g.team).forEach((b) => newBookings.push(b)));
-        const n = await importBookings(newBookings, bookings);
-        setAutoMsg(`${n} Heimspiel(e) automatisch abgeglichen.`);
+        const parts = [];
+        if (allHome.length > 0) {
+          const newBookings = [];
+          allHome.forEach((g) => icsGamesToBookings([g], g.team).forEach((b) => newBookings.push(b)));
+          const n = await importBookings(newBookings, bookings);
+          if (n > 0) parts.push(`${n} Heimspiel(e)`);
+        }
+        if (allAway.length > 0 && importAwayGames) {
+          const newAway = [];
+          allAway.forEach((g) => icsGamesToAwayGames([g], g.team).forEach((a) => newAway.push(a)));
+          const n = await importAwayGames(newAway);
+          if (n > 0) parts.push(`${n} Auswärtsspiel(e)`);
+        }
+        setAutoMsg(parts.length > 0 ? `${parts.join(" und ")} automatisch abgeglichen.` : null);
         setTimeout(() => setAutoMsg(null), 4000);
       } catch {
         setAutoMsg(null);
@@ -2808,16 +2968,20 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
     setLoading(true); setMsg(null);
     const today = dayKey(new Date());
     const all = [];
+    const allAway = [];
     try {
       for (const c of cals) {
         const resp = await fetch("/api/bfv-ical?url=" + encodeURIComponent(c.url));
         if (!resp.ok) { setMsg("Ein Kalender konnte nicht geladen werden."); continue; }
         const text = await resp.text();
         homeGamesFromIcs(text, today).forEach((g) => all.push({ ...g, team: c.team }));
+        awayGamesFromIcs(text, today).forEach((g) => allAway.push({ ...g, team: c.team }));
       }
       all.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+      allAway.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
       setGames(all);
-      if (all.length === 0) setMsg("Keine kommenden Heimspiele gefunden.");
+      setAwayGamesFound(allAway);
+      if (all.length === 0 && allAway.length === 0) setMsg("Keine kommenden Spiele gefunden.");
     } catch (e) {
       setMsg("Abruf fehlgeschlagen: " + (e.message || ""));
     } finally {
@@ -2826,15 +2990,27 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
   };
 
   const doImport = async () => {
-    if (!importBookings || games.length === 0) return;
+    if (!importBookings) return;
     setImporting(true); setMsg(null);
     try {
-      const newBookings = [];
-      games.forEach((g) => {
-        icsGamesToBookings([g], g.team).forEach((b) => newBookings.push(b));
-      });
-      const n = await importBookings(newBookings, bookings);
-      setMsg(`${n} Heimspiel(e) in den Plan eingetragen/aktualisiert.`);
+      const parts = [];
+      if (games.length > 0) {
+        const newBookings = [];
+        games.forEach((g) => {
+          icsGamesToBookings([g], g.team).forEach((b) => newBookings.push(b));
+        });
+        const n = await importBookings(newBookings, bookings);
+        parts.push(`${n} Heimspiel(e)`);
+      }
+      if (awayGamesFound.length > 0 && importAwayGames) {
+        const newAway = [];
+        awayGamesFound.forEach((g) => {
+          icsGamesToAwayGames([g], g.team).forEach((a) => newAway.push(a));
+        });
+        const n = await importAwayGames(newAway);
+        parts.push(`${n} Auswärtsspiel(e)`);
+      }
+      setMsg(parts.length > 0 ? `${parts.join(" und ")} in den Plan eingetragen/aktualisiert.` : "Nichts zu importieren.");
     } catch (e) {
       setMsg("Eintragen fehlgeschlagen: " + (e.message || ""));
     } finally {
@@ -2846,8 +3022,9 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
     <div style={{ ...S.card, marginTop: 14, background: "#f5f3ff", border: "1px solid #ddd6fe" }}>
       <h3 style={{ margin: "0 0 6px" }}>📅 Spielplan-Kalender (BFV)</h3>
       <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>
-        BFV-Kalender-Links hinterlegen (pro Mannschaft einer). Beim Öffnen dieses Bereichs werden die
-        Heimspiele automatisch abgeglichen und eingetragen. Manuell geht es jederzeit über die Knöpfe unten.
+        BFV-Kalender-Links hinterlegen (pro Mannschaft einer). Beim Öffnen dieses Bereichs werden
+        Heim- UND Auswärtsspiele automatisch abgeglichen und eingetragen. Manuell geht es jederzeit über die Knöpfe unten.
+        Auswärtsspiele belegen keinen Platz und werden rein informativ im Kalender angezeigt.
       </p>
       {autoMsg && (
         <div style={{ ...S.warnBanner, background: "#eff6ff", color: "#1e40af", border: "1px solid #bfdbfe", display: "block", marginBottom: 10 }}>
@@ -2887,16 +3064,18 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={S.okBtn} onClick={saveCals}>Kalender speichern</button>
           <button style={S.navBtn} onClick={fetchAll} disabled={loading || cals.length === 0}>
-            {loading ? "Lade…" : "Heimspiele abrufen"}
+            {loading ? "Lade…" : "Spielplan abrufen"}
           </button>
         </div>
       )}
       {msg && <div style={{ fontSize: 12, color: C.textSec, marginTop: 6 }}>{msg}</div>}
 
-      {games.length > 0 && (
+      {(games.length > 0 || awayGamesFound.length > 0) && (
         <div style={{ marginTop: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>Erkannte Heimspiele ({games.length})</div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>
+              Erkannt: {games.length} Heimspiel{games.length === 1 ? "" : "e"}, {awayGamesFound.length} Auswärtsspiel{awayGamesFound.length === 1 ? "" : "e"}
+            </div>
             {canEdit && (
               <button style={S.primaryBtn} onClick={doImport} disabled={importing}>
                 {importing ? "Trage ein…" : "In Plan eintragen"}
@@ -2910,7 +3089,19 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
             return (
               <div key={i} style={{ ...S.wishRow }}>
                 <span style={{ fontSize: 13 }}>
-                  <b>{datum} · {g.time}</b> · {platz}<br />
+                  <b>{datum} · {g.time}</b> · 🏠 {platz}<br />
+                  <span style={{ color: C.textSec }}>{g.home} – {g.guest} ({teamById(g.team)?.name || g.team})</span>
+                </span>
+              </div>
+            );
+          })}
+          {awayGamesFound.map((g, i) => {
+            const d = new Date(g.date + "T12:00");
+            const datum = d.toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" });
+            return (
+              <div key={"away-" + i} style={{ ...S.wishRow }}>
+                <span style={{ fontSize: 13 }}>
+                  <b>{datum} · {g.time}</b> · 🚌 Auswärts<br />
                   <span style={{ color: C.textSec }}>{g.home} – {g.guest} ({teamById(g.team)?.name || g.team})</span>
                 </span>
               </div>
@@ -2965,7 +3156,7 @@ function KickoffCalc() {
 
 /* ---------------- Mähplan (eingebettet) ---------------- */
 /* ---------------- Vorstand-Bereich (nur Admin) ---------------- */
-function VorstandPanel({ users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, importBookings, bookings }) {
+function VorstandPanel({ users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser, isVorstand, changePin, irrigation, saveIrrigation, importBookings, bookings, importAwayGames }) {
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
       <h2 style={{ marginTop: 0, fontSize: 20, display: "flex", alignItems: "center", gap: 8 }}>
@@ -2990,6 +3181,7 @@ function VorstandPanel({ users, saveUser, setUserRole, setUserTeams, setUserRigh
         canEdit={isVorstand}
         importBookings={importBookings}
         bookings={bookings}
+        importAwayGames={importAwayGames}
       />
       <MaehplanToggle irrigation={irrigation} saveIrrigation={saveIrrigation} />
     </div>

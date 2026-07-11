@@ -278,6 +278,27 @@ export const buildIrrigationWindows = (plan) => {
 
 const windowsOverlap = (a, b) => a.startSec < b.endSec && b.startSec < a.endSec;
 
+// Für die einfache 💧-Anzeige (Kalender-Badges, PDFs) reicht "läuft an diesem Tag
+// IRGENDEIN Programm dieses Platzes" – das ist die Vereinigung der Tage aller
+// Programme. Fällt auf die alte feld-weite "days"-Liste zurück, falls noch kein
+// Programm eigene Tage hat (Altdaten vor der Umstellung auf Tage pro Programm).
+export const unionIrrigationDays = (fieldIrr) => {
+  if (!fieldIrr) return [];
+  const progs = fieldIrr.programmes || {};
+  const set = new Set();
+  let anyProgHasDays = false;
+  Object.values(progs).forEach((p) => {
+    if (Array.isArray(p.days) && p.days.length > 0) {
+      anyProgHasDays = true;
+      p.days.forEach((d) => set.add(d));
+    }
+  });
+  if (!anyProgHasDays && Array.isArray(fieldIrr.days)) {
+    fieldIrr.days.forEach((d) => set.add(d));
+  }
+  return Array.from(set);
+};
+
 // Prüft eine Liste von Fenstern (z. B. aus mehreren Plätzen zusammengeführt)
 // auf Überschneidungen. Gibt Paare zurück, die sich zeitlich überlappen.
 export const findIrrigationOverlaps = (windows) => {

@@ -420,6 +420,33 @@ export const homeGamesFromIcs = (icsText, todayKey, homeNeedle = "Dörfleins") =
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 };
 
+// Kehrseite von homeGamesFromIcs: alles, was NICHT am eigenen Standort liegt,
+// ist ein Auswärtsspiel. Nutzt denselben geladenen ICS-Text, kein Zusatz-Abruf nötig.
+export const awayGamesFromIcs = (icsText, todayKey, homeNeedle = "Dörfleins") => {
+  const needle = homeNeedle.toLowerCase();
+  return parseIcsGames(icsText)
+    .filter((g) => !(g.location || "").toLowerCase().includes(needle))
+    .filter((g) => !todayKey || g.date >= todayKey)
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+};
+
+// Wandelt erkannte Auswärtsspiele in rein informative Kalender-Einträge um.
+// Kein eigener Platz, keine Zone, keine Konfliktprüfung – nur Anzeige.
+// Gegner = "home" aus dem Spieltitel, weil bei einem Auswärtsspiel die
+// gastgebende Mannschaft (nicht wir) an erster Stelle im Titel steht.
+export const icsGamesToAwayGames = (games, teamId) => {
+  return (games || []).map((g) => ({
+    date: g.date,
+    team: teamId || g.team,
+    start: g.time,
+    end: g.endTime || addMinutes(g.time, 100),
+    opponent: g.home || "",
+    venue: g.location || "",
+    title: g.summary ? g.summary.split(",")[0] : `${g.home} - ${g.guest}`,
+    bfvUid: g.uid,
+  }));
+};
+
 // ====================================================================
 //  HEIMSPIEL-AUTOMATIK
 //  Findet kommende Heimspiele (kind=match) der ausgewählten Mannschaften,

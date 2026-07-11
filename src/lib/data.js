@@ -176,6 +176,37 @@ export function useBookings() {
   };
 }
 
+// Auswärtsspiele: bewusst eine EIGENE Collection, komplett getrennt von "bookings".
+// Kein Platz, keine Zone, keine Konfliktprüfung – rein informative Kalender-Einträge.
+export function useAwayGames() {
+  const { items, ready } = useCollection("awayGames");
+  const uniqueId = () => `a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const idFor = (g) => (g.bfvUid ? "bfv-" + String(g.bfvUid).replace(/[^A-Za-z0-9_:-]/g, "") : uniqueId());
+  return {
+    awayGames: items,
+    awayGamesReady: ready,
+    addAwayGame: (g) => {
+      const withOwner = { ...g, ownerUid: g.ownerUid || uid() };
+      return setDoc(doc(db, "awayGames", idFor(withOwner)), withOwner);
+    },
+    removeAwayGame: (id) => deleteDoc(doc(db, "awayGames", id)),
+    // Importiert BFV-Auswärtsspiele: Doc-ID = bfv-<UID> (wie bei Heimspielen),
+    // ein erneuter Import überschreibt/aktualisiert dasselbe Spiel statt Dubletten anzulegen.
+    importAwayGames: async (games) => {
+      const batch = writeBatch(db);
+      const owner = uid();
+      let count = 0;
+      games.forEach((g) => {
+        if (!g.bfvUid) return;
+        batch.set(doc(db, "awayGames", idFor(g)), { ...g, ownerUid: owner, source: "bfv" });
+        count++;
+      });
+      await batch.commit();
+      return count;
+    },
+  };
+}
+
 export function useWishes() {
   const { items, ready } = useCollection("wishes");
   return {

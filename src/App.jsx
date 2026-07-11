@@ -261,6 +261,31 @@ function useIsMobile(maxWidth = 720) {
   return isMobile;
 }
 
+// Erkennt Wisch-Gesten (links/rechts) auf Handys. threshold = Mindestweg in Pixel,
+// damit ein normaler Scroll-Versuch nicht versehentlich als Wisch gewertet wird.
+function useSwipe(onSwipeLeft, onSwipeRight, threshold = 50) {
+  const startX = useRef(null);
+  const startY = useRef(null);
+  const onTouchStart = (e) => {
+    startX.current = e.touches[0].clientX;
+    startY.current = e.touches[0].clientY;
+  };
+  const onTouchEnd = (e) => {
+    if (startX.current === null) return;
+    const dx = e.changedTouches[0].clientX - startX.current;
+    const dy = e.changedTouches[0].clientY - startY.current;
+    // Nur werten, wenn deutlich mehr horizontal als vertikal bewegt wurde
+    // (sonst würde normales Hoch-/Runterscrollen fälschlich als Wisch erkannt).
+    if (Math.abs(dx) > threshold && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0) onSwipeLeft && onSwipeLeft();
+      else onSwipeRight && onSwipeRight();
+    }
+    startX.current = null;
+    startY.current = null;
+  };
+  return { onTouchStart, onTouchEnd };
+}
+
 export default function App() {
   // ----- Theme (hell / dunkel / automatisch) -----
   const [theme, setThemeState] = useState(() => {
@@ -489,6 +514,15 @@ export default function App() {
           <button style={{ ...S.navBtn, whiteSpace: "nowrap" }} onClick={() => { setView("trainer"); setMsgsSeen(true); }}>Nachrichten ansehen</button>
         </div>
       )}
+
+      <TeamJumpSearch
+        bookings={bookings}
+        calMode={calMode}
+        setCalMode={setCalMode}
+        setWeekStart={setWeekStart}
+        setMonthAnchor={setMonthAnchor}
+        setView={setView}
+      />
 
       {calMode === "woche" && (
         <>
@@ -1292,6 +1326,10 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
     return e.team === teamFilter;
   };
   const filterActive = teamFilter && teamFilter !== "all";
+  const daySwipeHandlers = useSwipe(
+    () => setDayIdx((i) => Math.min(days.length - 1, i + 1)), // nach links wischen = Folgetag
+    () => setDayIdx((i) => Math.max(0, i - 1))                 // nach rechts wischen = Vortag
+  );
   return (
     <div style={S.card} className="print-area">
       <div style={S.gridHead}>
@@ -1432,7 +1470,7 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
         if (isMobile) {
           const d = days[Math.min(dayIdx, days.length - 1)];
           return (
-            <div>
+            <div {...daySwipeHandlers}>
               <div className="no-print" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
                 <button onClick={() => setDayIdx((i) => Math.max(0, i - 1))} disabled={dayIdx <= 0}
                   style={{ ...S.navBtn, opacity: dayIdx <= 0 ? 0.4 : 1, padding: "8px 14px" }}>← Vortag</button>
@@ -1462,6 +1500,69 @@ function WeekGrid({ days, entriesForDay, lockForDayField, activeField, setActive
         return <div style={S.weekRow}>{days.map(renderDay)}</div>;
       })()}
       <Legend />
+    </div>
+  );
+}
+
+// Textsuche nach Mannschaft/Gegner: zeigt die nächsten passenden Termine und springt per Klick dorthin.
+function TeamJumpSearch({ bookings, calMode, setCalMode, setWeekStart, setMonthAnchor, setView }) {
+  const [q, setQ] = useState("");
+  const todayKeyStr = dayKey(new Date());
+
+  const results = React.useMemo(() => {
+    const query = q.trim().toLowerCase();
+    if (!query) return [];
+    return bookings
+      .filter((b) => b.status !== "beantragt" && b.date >= todayKeyStr)
+      .filter((b) => {
+        const t = teamById(b.team);
+        const name = (t ? t.name : b.team || "").toLowerCase();
+        const opp = (b.opponent || "").toLowerCase();
+        return name.includes(query) || opp.includes(query);
+      })
+      .sort((a, b2) => (a.date + a.start).localeCompare(b2.date + b2.start))
+      .slice(0, 8);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, bookings, todayKeyStr]);
+
+  const jumpTo = (b) => {
+    const d = new Date(b.date + "T12:00");
+    if (calMode === "monat") {
+      setMonthAnchor(new Date(d.getFullYear(), d.getMonth(), 1));
+    } else {
+      setCalMode("woche");
+      setWeekStart(mondayOf(d));
+    }
+    setView("viewer");
+    setQ("");
+  };
+
+  return (
+    <div className="no-print" style={{ position: "relative", marginBottom: 12 }}>
+      <input
+        type="text"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="🔍 Mannschaft oder Gegner suchen…"
+        style={{ ...S.select, width: "100%", maxWidth: 360 }}
+      />
+      {q.trim() && (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.surface, marginTop: 4, maxWidth: 360, overflow: "hidden" }}>
+          {results.length === 0 && (
+            <div style={{ padding: "8px 10px", fontSize: 13, color: C.textSec }}>Keine kommenden Termine gefunden.</div>
+          )}
+          {results.map((b) => {
+            const t = teamById(b.team);
+            const d = new Date(b.date + "T12:00");
+            return (
+              <button key={b.id} onClick={() => jumpTo(b)}
+                style={{ display: "block", width: "100%", textAlign: "left", border: "none", borderBottom: `1px solid ${C.border}`, background: "transparent", cursor: "pointer", padding: "8px 10px", fontSize: 13 }}>
+                <strong>{d.getDate()}.{d.getMonth() + 1}.</strong> · {b.start} · {t ? t.name : b.team}{b.kind === "match" && b.opponent ? ` vs. ${b.opponent}` : ""}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1656,6 +1757,7 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
   const scrollToToday = () => {
     requestAnimationFrame(() => todayRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }));
   };
+  const monthSwipeHandlers = useSwipe(() => shiftMonth(1), () => shiftMonth(-1));
 
   // Alle Zusatzinfos für einen Tag an einer Stelle berechnen (für Raster + Liste gleich)
   const computeDayMeta = (d) => {
@@ -1746,7 +1848,7 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, lockForDayField
       {isAdmin && <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }} className="no-print">Als Platzwart auf einen Eintrag tippen, um ihn zu löschen.</p>}
 
       {isMobile ? (
-        <div style={{ display: "flex", flexDirection: "column" }}>
+        <div {...monthSwipeHandlers} style={{ display: "flex", flexDirection: "column" }}>
           {monthDays.map((d) => {
             const meta = computeDayMeta(d);
             const today = dayKey(d) === dayKey(new Date());

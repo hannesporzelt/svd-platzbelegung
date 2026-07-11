@@ -8,3 +8,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <App />
   </React.StrictMode>
 );
+
+// PWA: App als installierbare Web-App nutzbar machen (Icon auf dem Handy-Startbildschirm).
+// Läuft nur, wenn der Browser Service Worker unterstützt – schadet sonst nicht.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}

@@ -100,28 +100,32 @@ async function exportMonthPDF(monthAnchor, entriesForDay, irrDays, extras = {}) 
     const combined = [...entries, ...away].sort((a, b) => (a.start || "").localeCompare(b.start || ""));
     pdf.setFont("helvetica", "normal"); pdf.setFontSize(6.5);
     let ey = y + 8;
-    const maxLines = Math.floor((rowH - 8) / 2.7);
-    combined.slice(0, maxLines).forEach((e) => {
+    const lineH = 2.7;
+    const cellBottom = y + rowH - 1.3;
+    let shown = 0;
+    for (const e of combined) {
       if (e._away) {
+        const label = `${e.start} Ausw.: ${teamById(e.team)?.name || e.team} bei ${e.opponent || "?"}`;
+        const lines = pdf.splitTextToSize(label, colW - 4);
+        if (ey + lines.length * lineH > cellBottom) break;
         pdf.setTextColor(91, 33, 182);
-        let label = `${e.start} Ausw.: ${teamById(e.team)?.name || e.team} bei ${e.opponent || "?"}`;
-        label = pdf.splitTextToSize(label, colW - 4)[0];
-        pdf.text(label, x + 3.5, ey);
-        ey += 2.7;
-        return;
+        lines.forEach((ln) => { pdf.text(ln, x + 3.5, ey); ey += lineH; });
+        shown++;
+        continue;
       }
       const t = teamById(e.team);
-      if (t) { const col = hexToRgb(t.color); pdf.setFillColor(col.r, col.g, col.b); pdf.circle(x + 2, ey - 1, 0.7, "F"); }
-      pdf.setTextColor(40, 40, 40);
       const z = zoneShort[e.zone] ? "·" + zoneShort[e.zone] : "";
       const opp = e.kind === "match" && e.opponent ? ` vs. ${e.opponent}` : "";
-      let label = `${e.start} ${t ? t.name : e.team}${opp} ${fieldShort[e.field] || ""}${z}`;
-      label = pdf.splitTextToSize(label, colW - 4)[0];
-      pdf.text(label, x + 3.5, ey);
-      ey += 2.7;
-    });
-    if (combined.length > maxLines) {
-      pdf.setTextColor(120); pdf.text(`+${combined.length - maxLines} weitere`, x + 3.5, ey);
+      const label = `${e.start} ${t ? t.name : e.team}${opp} ${fieldShort[e.field] || ""}${z}`;
+      const lines = pdf.splitTextToSize(label, colW - 4);
+      if (ey + lines.length * lineH > cellBottom) break;
+      if (t) { const col = hexToRgb(t.color); pdf.setFillColor(col.r, col.g, col.b); pdf.circle(x + 2, ey - 1, 0.7, "F"); }
+      pdf.setTextColor(40, 40, 40);
+      lines.forEach((ln) => { pdf.text(ln, x + 3.5, ey); ey += lineH; });
+      shown++;
+    }
+    if (combined.length > shown && ey + lineH <= cellBottom + 1) {
+      pdf.setTextColor(120); pdf.text(`+${combined.length - shown} weitere`, x + 3.5, ey);
     }
   });
 
@@ -232,28 +236,37 @@ async function exportWeekPDF(weekDays, entriesForDay, irrDays, extras = {}) {
     const away = (awayGamesForDay ? awayGamesForDay(d) : []).map((g) => ({ ...g, _away: true }));
     const combined = [...entries, ...away].sort((a, b) => (a.start || "").localeCompare(b.start || ""));
     let ey = gridTop + 5;
+    const bottom = gridTop + gridH - 2;
     pdf.setFont("helvetica", "normal"); pdf.setFontSize(7);
-    combined.forEach((e) => {
-      if (ey > gridTop + gridH - 3) return;
+    outer:
+    for (const e of combined) {
+      if (ey > bottom) break;
+      let line1, line2, mainColor, subColor;
       if (e._away) {
-        pdf.setTextColor(91, 33, 182);
-        const line1 = `${e.start} Ausw.: ${teamById(e.team)?.name || e.team}`;
-        const line2 = `bei ${e.opponent || "?"}`;
-        pdf.text(pdf.splitTextToSize(line1, colW - 5)[0], x + 3.6, ey);
-        ey += 3.1;
-        if (ey <= gridTop + gridH - 3) { pdf.text(pdf.splitTextToSize(line2, colW - 5)[0], x + 3.6, ey); ey += 3.6; }
-        return;
+        line1 = `${e.start} Ausw.: ${teamById(e.team)?.name || e.team}`;
+        line2 = `bei ${e.opponent || "?"}`;
+        mainColor = [91, 33, 182]; subColor = [91, 33, 182];
+      } else {
+        const t = teamById(e.team);
+        if (t) { const col = hexToRgb(t.color); pdf.setFillColor(col.r, col.g, col.b); pdf.circle(x + 2, ey - 1.2, 0.8, "F"); }
+        const z = zoneShort[e.zone] ? "·" + zoneShort[e.zone] : "";
+        line1 = `${e.start} ${t ? t.name : e.team}`;
+        line2 = `${fieldShort[e.field] || ""}${z}${e.kind === "match" ? (e.opponent ? ` · vs. ${e.opponent}` : " · Heimspiel") : e.kind === "turnier" ? " · Turnier" : ""}`;
+        mainColor = [30, 30, 30]; subColor = [110, 110, 110];
       }
-      const t = teamById(e.team);
-      if (t) { const col = hexToRgb(t.color); pdf.setFillColor(col.r, col.g, col.b); pdf.circle(x + 2, ey - 1.2, 0.8, "F"); }
-      pdf.setTextColor(30, 30, 30);
-      const z = zoneShort[e.zone] ? "·" + zoneShort[e.zone] : "";
-      const line1 = `${e.start} ${t ? t.name : e.team}`;
-      const line2 = `${fieldShort[e.field] || ""}${z}${e.kind === "match" ? (e.opponent ? ` · vs. ${e.opponent}` : " · Heimspiel") : e.kind === "turnier" ? " · Turnier" : ""}`;
-      pdf.text(pdf.splitTextToSize(line1, colW - 5)[0], x + 3.6, ey);
-      ey += 3.1;
-      if (ey <= gridTop + gridH - 3) { pdf.setTextColor(110, 110, 110); pdf.text(pdf.splitTextToSize(line2, colW - 5)[0], x + 3.6, ey); ey += 3.6; }
-    });
+      const lines1 = pdf.splitTextToSize(line1, colW - 5);
+      const lines2 = line2 ? pdf.splitTextToSize(line2, colW - 5) : [];
+      pdf.setTextColor(mainColor[0], mainColor[1], mainColor[2]);
+      for (const ln of lines1) {
+        if (ey > bottom) break outer;
+        pdf.text(ln, x + 3.6, ey); ey += 3.1;
+      }
+      pdf.setTextColor(subColor[0], subColor[1], subColor[2]);
+      for (const ln of lines2) {
+        if (ey > bottom) break outer;
+        pdf.text(ln, x + 3.6, ey); ey += 3.3;
+      }
+    }
     if (combined.length === 0) { pdf.setTextColor(150, 150, 150); pdf.text("frei", x + 3.6, gridTop + 5); }
   });
 

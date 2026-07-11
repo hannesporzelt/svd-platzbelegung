@@ -399,6 +399,7 @@ export const icsGamesToBookings = (games, teamId) => {
       kind: "match",
       status: "frei",
       title: g.summary ? g.summary.split(",")[0] : `${g.home} - ${g.guest}`,
+      opponent: g.guest || "",
       bfvUid: g.uid,
     }));
 };

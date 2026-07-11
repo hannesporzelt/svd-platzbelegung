@@ -2425,26 +2425,29 @@ const IRR_FIELDS = [
 const IRR_WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const IRR_PROG_LABELS = ["A","B","C","D","E","F","G","H"];
 
-// Standard-Programm A (Migration von alten Einzel-Startzeiten)
-const IRR_DEFAULT_PROG = { runMin: 15, gapSec: 5, stations: 12, starts: ["","","","","",""], days: [] };
-const IRR_DEFAary = {
-  p1: { days: ["Mo", "Do"], programmes: { A: { ...IRR_DEFAULT_PROG, days: ["Mo","Do"], starts: ["00:45","03:55","","","",""] } } },
-  p2: { days: ["Mi", "Fr"], programmes: { A: { ...IRR_DEFAULT_PROG, days: ["Mi","Fr"], starts: ["00:45","03:55","","","",""] } } },
-};
+// Standard-Programm A (Migration von alten Einzel-Startzeiten).
+// WICHTIG: Fabrik-Funktionen statt geteilter Konstanten – sonst würden neu
+// angelegte Programme (z. B. B) sich Arrays (days/starts) mit anderen Programmen
+// teilen, sodass das Ändern von einem Programm unbeabsichtigt ein anderes mit ändert.
+const defaultProg = () => ({ runMin: 15, gapSec: 5, stations: 12, starts: ["","","","","",""], days: [] });
+const defaultField = (fid) => ({
+  days: fid === "p1" ? ["Mo", "Do"] : ["Mi", "Fr"],
+  programmes: { A: { ...defaultProg(), days: fid === "p1" ? ["Mo","Do"] : ["Mi","Fr"], starts: ["00:45","03:55","","","",""] } },
+});
 
 // Migriert alte Datenstruktur (starts, runMin, gapSec, EIN gemeinsames days für alle
 // Programme) → neue Struktur, in der JEDES Programm eigene Bewässerungstage hat.
 function migrateIrrField(fromDb, fid) {
-  if (!fromDb) return { ...IRR_DEFAary[fid] };
+  if (!fromDb) return defaultField(fid);
   if (fromDb.programmes) {
     // Schon (teilweise) neue Struktur – Programme ohne eigene "days" bekommen
     // einmalig die alte feld-weite Tage-Liste als Startwert (Altdaten-Übergang).
-    const legacyDays = fromDb.days || IRR_DEFAary[fid].days;
+    const legacyDays = fromDb.days || defaultField(fid).days;
     const programmes = {};
     Object.entries(fromDb.programmes).forEach(([key, p]) => {
-      programmes[key] = { ...p, days: Array.isArray(p.days) ? p.days : (key === "A" ? legacyDays : []) };
+      programmes[key] = { ...p, days: Array.isArray(p.days) ? [...p.days] : (key === "A" ? [...legacyDays] : []) };
     });
-    return { ...IRR_DEFAary[fid], ...fromDb, programmes };
+    return { ...defaultField(fid), ...fromDb, programmes };
   }
   // Ganz alte Struktur (keine Programme) → Programm A daraus bauen
   const progA = {
@@ -2452,9 +2455,9 @@ function migrateIrrField(fromDb, fid) {
     gapSec: fromDb.gapSec || 5,
     stations: fromDb.stations || 12,
     starts: [...(fromDb.starts || []).slice(0, 6), ...Array(6).fill("")].slice(0, 6),
-    days: fromDb.days || IRR_DEFAary[fid].days,
+    days: fromDb.days ? [...fromDb.days] : defaultField(fid).days,
   };
-  return { days: fromDb.days || IRR_DEFAary[fid].days, programmes: { A: progA } };
+  return { days: fromDb.days ? [...fromDb.days] : defaultField(fid).days, programmes: { A: progA } };
 }
 
 function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
@@ -2519,7 +2522,7 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
   // ── Hilfsfunktionen für Draft ───────────────────────────────────────
   const updProg = (fid, prog, patch) => setDraft(d => ({
     ...d, [fid]: { ...d[fid], programmes: { ...d[fid].programmes,
-      [prog]: { ...(d[fid].programmes?.[prog] || IRR_DEFAULT_PROG), ...patch } } }
+      [prog]: { ...(d[fid].programmes?.[prog] || defaultProg()), ...patch } } }
   }));
 
   // Tage gehören jetzt zum PROGRAMM, nicht mehr zum ganzen Platz – so können
@@ -2539,7 +2542,7 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
     const used = Object.keys(draft[fid].programmes || {});
     const next = IRR_PROG_LABELS.find(l => !used.includes(l));
     if (!next) return;
-    updProg(fid, next, { ...IRR_DEFAULT_PROG });
+    updProg(fid, next, defaultProg());
     setActiveProg(a => ({ ...a, [fid]: next }));
   };
 
@@ -2609,10 +2612,10 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
 
       {IRR_FIELDS.map(f => {
         const d = draft[f.id];
-        const progs = d.programmes || { A: { ...IRR_DEFAULT_PROG } };
+        const progs = d.programmes || { A: defaultProg() };
         const progKeys = Object.keys(progs).sort();
         const ap = activeProg[f.id] || progKeys[0] || "A";
-        const prog = progs[ap] || IRR_DEFAULT_PROG;
+        const prog = progs[ap] || defaultProg();
         const fieldColor = f.id === "p1" ? "#0f6e3e" : "#1d6fb8";
 
         // Fenster für aktives Programm

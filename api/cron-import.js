@@ -59,7 +59,7 @@ const addMin = (hhmm, mins) => {
   return `${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
 };
 
-function homeGamesFromIcs(ics, todayKey) {
+function gamesFromIcs(ics, todayKey) {
   const text = unfold(ics);
   const blocks = text.split("BEGIN:VEVENT").slice(1);
   const out = [];
@@ -72,14 +72,14 @@ function homeGamesFromIcs(ics, todayKey) {
     const start = parseIcsDate(get("DTSTART"));
     if (!start) continue;
     const loc = get("LOCATION");
-    if (!loc.toLowerCase().includes("dörfleins")) continue;
+    const isHome = loc.toLowerCase().includes("dörfleins");
     if (todayKey && start.date < todayKey) continue;
     const end = parseIcsDate(get("DTEND"));
     const sum = get("SUMMARY");
     const { home, guest } = teamsFromSummary(sum);
     out.push({
       date: start.date, time: start.time, endTime: end ? end.time : null,
-      field: fieldFromLoc(loc), home, guest,
+      field: isHome ? fieldFromLoc(loc) : null, isHome, location: loc, home, guest,
       title: sum ? sum.split(",")[0] : `${home} - ${guest}`,
       uid: get("UID"),
     });
@@ -116,36 +116,50 @@ export default async function handler(req, res) {
 
     const today = todayKeyBerlin();
 
-    // 3. Heimspiele aus allen Kalendern sammeln
+    // 3. Alle Spiele (Heim + Auswärts) aus allen Kalendern sammeln
     const games = [];
     for (const c of list) {
       try {
         const r = await fetch(c.url, { headers: { "User-Agent": "SVD-Cron/1.0" } });
         if (!r.ok) continue;
         const text = await r.text();
-        homeGamesFromIcs(text, today).forEach((g) => games.push({ ...g, team: c.team }));
+        gamesFromIcs(text, today).forEach((g) => games.push({ ...g, team: c.team }));
       } catch { /* Kalender überspringen */ }
     }
 
-    // 4. NUR NEUE anlegen (bestehende nie ändern)
+    // 4. NUR NEUE anlegen (bestehende nie ändern) – Heimspiele -> bookings, Auswärtsspiele -> awayGames
     let added = 0;
+    let addedAway = 0;
     for (const g of games) {
-      if (!g.uid || !g.field) continue;
+      if (!g.uid) continue;
       const id = "bfv-" + String(g.uid).replace(/[^A-Za-z0-9_:-]/g, "");
-      const ref = db.collection("bookings").doc(id);
-      const exists = (await ref.get()).exists;
-      if (exists) continue; // Bestehendes NIE anfassen
-      await ref.set({
-        date: g.date, field: g.field,
-        zone: g.field === "p1" ? "voll" : "h1",
-        team: g.team, start: g.time, end: g.endTime || addMin(g.time, 100),
-        kind: "match", status: "frei", title: g.title, opponent: g.guest || "",
-        bfvUid: g.uid, source: "bfv", ownerUid: "cron",
-      });
-      added++;
+      if (g.isHome) {
+        if (!g.field) continue;
+        const ref = db.collection("bookings").doc(id);
+        const exists = (await ref.get()).exists;
+        if (exists) continue; // Bestehendes NIE anfassen
+        await ref.set({
+          date: g.date, field: g.field,
+          zone: g.field === "p1" ? "voll" : "h1",
+          team: g.team, start: g.time, end: g.endTime || addMin(g.time, 100),
+          kind: "match", status: "frei", title: g.title, opponent: g.guest || "",
+          bfvUid: g.uid, source: "bfv", ownerUid: "cron",
+        });
+        added++;
+      } else {
+        const ref = db.collection("awayGames").doc(id);
+        const exists = (await ref.get()).exists;
+        if (exists) continue; // Bestehendes NIE anfassen
+        await ref.set({
+          date: g.date, team: g.team, start: g.time, end: g.endTime || addMin(g.time, 100),
+          opponent: g.home || "", venue: g.location || "", title: g.title,
+          bfvUid: g.uid, source: "bfv", ownerUid: "cron",
+        });
+        addedAway++;
+      }
     }
 
-    res.status(200).json({ ok: true, scanned: games.length, added });
+    res.status(200).json({ ok: true, scanned: games.length, added, addedAway });
   } catch (e) {
     res.status(500).json({ error: e.message || "Fehler" });
   }

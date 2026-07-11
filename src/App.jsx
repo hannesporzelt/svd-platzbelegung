@@ -4,7 +4,7 @@ import {
   dayKey, mondayOf, addDays, isoWeek, fmtRange, expandRecurrence, zoneCovers,
   autoTrainingForDay, findConflicts, conflictIdsForEntries, effectiveSpan, warmupBlockFor,
   zonesOverlap, timeOverlap,
-  buildIrrigationWindows, findIrrigationOverlaps, passDurationSec, kickoffToStart, computeMatchIrrigation,
+  buildIrrigationWindows, findIrrigationOverlaps, unionIrrigationDays, passDurationSec, kickoffToStart, computeMatchIrrigation,
   homeGamesFromIcs, icsGamesToBookings, awayGamesFromIcs, icsGamesToAwayGames,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
@@ -520,8 +520,8 @@ export default function App() {
         calMode={calMode}
         setCalMode={setCalMode}
         onPrint={() => window.print()}
-        onPdf={() => exportMonthPDF(monthAnchor, entriesForDay, { p1: (irrigation?.p1?.days) || [], p2: (irrigation?.p2?.days) || [] }, { awayGamesForDay })}
-        onWeekPdf={() => exportWeekPDF(days, entriesForDay, { p1: (irrigation?.p1?.days) || [], p2: (irrigation?.p2?.days) || [] }, { notes, maehplan, maehSignups, maehKw, lockForDayField, awayGamesForDay })}
+        onPdf={() => exportMonthPDF(monthAnchor, entriesForDay, { p1: unionIrrigationDays(irrigation?.p1), p2: unionIrrigationDays(irrigation?.p2) }, { awayGamesForDay })}
+        onWeekPdf={() => exportWeekPDF(days, entriesForDay, { p1: unionIrrigationDays(irrigation?.p1), p2: unionIrrigationDays(irrigation?.p2) }, { notes, maehplan, maehSignups, maehKw, lockForDayField, awayGamesForDay })}
         theme={theme}
         setTheme={setTheme}
       />
@@ -1366,8 +1366,8 @@ function WeekGrid({ days, entriesForDay, awayGamesForDay, lockForDayField, activ
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days[0] && dayKey(days[0])]);
   const irrDays = {
-    p1: (irrigation && irrigation.p1 && irrigation.p1.days) || [],
-    p2: (irrigation && irrigation.p2 && irrigation.p2.days) || [],
+    p1: unionIrrigationDays(irrigation && irrigation.p1),
+    p2: unionIrrigationDays(irrigation && irrigation.p2),
   };
   const matchesFilter = (e) => {
     if (!teamFilter || teamFilter === "all") return true;
@@ -1774,8 +1774,8 @@ const MONTHS_LONG = ["Januar","Februar","März","April","Mai","Juni","Juli","Aug
 
 function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, awayGamesForDay, lockForDayField, isAdmin, removeBooking, notes, setNote, irrigation, maehplan, maehSignups, maehKw }) {
   const irrDays = {
-    p1: (irrigation && irrigation.p1 && irrigation.p1.days) || [],
-    p2: (irrigation && irrigation.p2 && irrigation.p2.days) || [],
+    p1: unionIrrigationDays(irrigation && irrigation.p1),
+    p2: unionIrrigationDays(irrigation && irrigation.p2),
   };
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
@@ -2426,23 +2426,33 @@ const IRR_WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const IRR_PROG_LABELS = ["A","B","C","D","E","F","G","H"];
 
 // Standard-Programm A (Migration von alten Einzel-Startzeiten)
-const IRR_DEFAULT_PROG = { runMin: 15, gapSec: 5, stations: 12, starts: ["","","","","",""] };
+const IRR_DEFAULT_PROG = { runMin: 15, gapSec: 5, stations: 12, starts: ["","","","","",""], days: [] };
 const IRR_DEFAary = {
-  p1: { days: ["Mo", "Do"], programmes: { A: { ...IRR_DEFAULT_PROG, starts: ["00:45","03:55","","","",""] } } },
-  p2: { days: ["Mi", "Fr"], programmes: { A: { ...IRR_DEFAULT_PROG, starts: ["00:45","03:55","","","",""] } } },
+  p1: { days: ["Mo", "Do"], programmes: { A: { ...IRR_DEFAULT_PROG, days: ["Mo","Do"], starts: ["00:45","03:55","","","",""] } } },
+  p2: { days: ["Mi", "Fr"], programmes: { A: { ...IRR_DEFAULT_PROG, days: ["Mi","Fr"], starts: ["00:45","03:55","","","",""] } } },
 };
 
-// Migriert alte Datenstruktur (starts, runMin, gapSec) → neue Programm-Struktur
+// Migriert alte Datenstruktur (starts, runMin, gapSec, EIN gemeinsames days für alle
+// Programme) → neue Struktur, in der JEDES Programm eigene Bewässerungstage hat.
 function migrateIrrField(fromDb, fid) {
   if (!fromDb) return { ...IRR_DEFAary[fid] };
-  // Schon neue Struktur?
-  if (fromDb.programmes) return { ...IRR_DEFAary[fid], ...fromDb };
-  // Alte Struktur → Programm A daraus bauen
+  if (fromDb.programmes) {
+    // Schon (teilweise) neue Struktur – Programme ohne eigene "days" bekommen
+    // einmalig die alte feld-weite Tage-Liste als Startwert (Altdaten-Übergang).
+    const legacyDays = fromDb.days || IRR_DEFAary[fid].days;
+    const programmes = {};
+    Object.entries(fromDb.programmes).forEach(([key, p]) => {
+      programmes[key] = { ...p, days: Array.isArray(p.days) ? p.days : (key === "A" ? legacyDays : []) };
+    });
+    return { ...IRR_DEFAary[fid], ...fromDb, programmes };
+  }
+  // Ganz alte Struktur (keine Programme) → Programm A daraus bauen
   const progA = {
     runMin: fromDb.runMin || 15,
     gapSec: fromDb.gapSec || 5,
     stations: fromDb.stations || 12,
     starts: [...(fromDb.starts || []).slice(0, 6), ...Array(6).fill("")].slice(0, 6),
+    days: fromDb.days || IRR_DEFAary[fid].days,
   };
   return { days: fromDb.days || IRR_DEFAary[fid].days, programmes: { A: progA } };
 }
@@ -2512,10 +2522,11 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
       [prog]: { ...(d[fid].programmes?.[prog] || IRR_DEFAULT_PROG), ...patch } } }
   }));
 
-  const toggleDay = (fid, wd) => {
-    const cur = draft[fid].days || [];
-    setDraft(d => ({ ...d, [fid]: { ...d[fid],
-      days: cur.includes(wd) ? cur.filter(x => x !== wd) : [...cur, wd] } }));
+  // Tage gehören jetzt zum PROGRAMM, nicht mehr zum ganzen Platz – so können
+  // Programm A und B auf demselben Platz unterschiedliche Tage laufen.
+  const toggleProgDay = (fid, prog, wd) => {
+    const cur = draft[fid].programmes?.[prog]?.days || [];
+    updProg(fid, prog, { days: cur.includes(wd) ? cur.filter(x => x !== wd) : [...cur, wd] });
   };
 
   const setStart = (fid, prog, idx, val) => {
@@ -2542,13 +2553,14 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
     setActiveProg(a => ({ ...a, [fid]: "A" }));
   };
 
-  // ── Konfliktprüfung: ALLE Programme ALLER Plätze ───────────────────
+  // ── Konfliktprüfung: ALLE Programme ALLER Plätze, aber nur an den Tagen,
+  // die das jeweilige PROGRAMM selbst eingetragen hat (nicht mehr feld-weit) ──
   const overlapsByDay = {};
   IRR_WEEKDAYS.forEach(wd => {
     const todays = [];
     ["p1","p2"].forEach(fid => {
-      if (!(draft[fid].days||[]).includes(wd)) return;
       Object.entries(draft[fid].programmes || {}).forEach(([prog, p]) => {
+        if (!(p.days||[]).includes(wd)) return;
         buildIrrigationWindows({
           fieldId: fid + "_" + prog,
           starts: (p.starts||[]).filter(Boolean),
@@ -2576,7 +2588,10 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
     <div>
       <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
         Beregnungsprogramme für beide Plätze. Beide Plätze teilen sich <b>eine Pumpe</b> –
-        es darf nie mehr als eine Station gleichzeitig laufen (über alle Programme aller Plätze).{" "}
+        es darf nie mehr als eine Station gleichzeitig laufen (über alle Programme aller Plätze,
+        aber nur an Tagen, an denen die jeweiligen Programme wirklich laufen).{" "}
+        Jedes Programm (A, B, …) hat eigene Wochentage – Programm A und B auf demselben Platz
+        können also an unterschiedlichen Tagen laufen, ohne dass ein Konflikt gemeldet wird.{" "}
         {canEdit ? "Du kannst die Programme und Zeiten ändern." : "Nur ansehen – Änderungsrecht hat der Admin."}
       </p>
 
@@ -2617,23 +2632,6 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
               </h3>
             </div>
 
-            {/* Bewässerungstage */}
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 12, color: C.textSec, marginBottom: 4 }}>Bewässerungstage</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {IRR_WEEKDAYS.map(wd => {
-                  const on = (d.days||[]).includes(wd);
-                  return (
-                    <button key={wd} disabled={!canEdit} onClick={() => toggleDay(f.id, wd)}
-                      style={{ ...S.roleBtn, border: `1px solid ${C.border}`, fontSize: 12,
-                        ...(on ? { background: fieldColor, color: "#fff", borderColor: fieldColor, fontWeight: 600 } : {}) }}>
-                      {wd}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
             {/* Programm-Tabs */}
             <div style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 12, color: C.textSec, marginBottom: 6 }}>Programme</div>
@@ -2663,6 +2661,28 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                   <b style={{ color: fieldColor }}>Programm {ap}</b>
                   <span style={{ fontSize: 12, color: C.textSec }}>Ende letzte Station: <b>{lastEnd}</b></span>
+                </div>
+
+                {/* Bewässerungstage – gehören zu DIESEM Programm, nicht zum ganzen Platz */}
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, color: C.textSec, marginBottom: 4 }}>Tage für Programm {ap}</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {IRR_WEEKDAYS.map(wd => {
+                      const on = (prog.days||[]).includes(wd);
+                      return (
+                        <button key={wd} disabled={!canEdit} onClick={() => toggleProgDay(f.id, ap, wd)}
+                          style={{ ...S.roleBtn, border: `1px solid ${C.border}`, fontSize: 12,
+                            ...(on ? { background: fieldColor, color: "#fff", borderColor: fieldColor, fontWeight: 600 } : {}) }}>
+                          {wd}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(prog.days||[]).length === 0 && (
+                    <p style={{ fontSize: 11, color: C.textSec, marginTop: 4, marginBottom: 0 }}>
+                      Kein Tag ausgewählt – Programm {ap} läuft an keinem Tag.
+                    </p>
+                  )}
                 </div>
 
                 {/* Parameter */}

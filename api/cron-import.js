@@ -139,7 +139,7 @@ export default async function handler(req, res) {
         date: g.date, field: g.field,
         zone: g.field === "p1" ? "voll" : "h1",
         team: g.team, start: g.time, end: g.endTime || addMin(g.time, 100),
-        kind: "match", status: "frei", title: g.title,
+        kind: "match", status: "frei", title: g.title, opponent: g.guest || "",
         bfvUid: g.uid, source: "bfv", ownerUid: "cron",
       });
       added++;

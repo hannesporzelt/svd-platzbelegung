@@ -132,7 +132,76 @@ async function exportMonthPDF(monthAnchor, entriesForDay, irrDays, extras = {}) 
   pdf.save(`Platzbelegung-${year}-${String(month + 1).padStart(2, "0")}.pdf`);
 }
 
-// Wochenplan als PDF (DIN A4 quer): 7 Tagesspalten mit den Einträgen.
+// Team-Liste als PDF (DIN A4 hoch): offene Anträge + bestätigte Belegungen einer
+// einzelnen Mannschaft, tabellarisch mit automatischem Seitenumbruch.
+async function exportTeamListPDF(teamName, requests, confirmed, rangeLabel) {
+  let jsPDF;
+  try {
+    jsPDF = await loadJsPDF();
+  } catch (e) {
+    window.alert(e.message || "PDF konnte nicht erstellt werden.");
+    return;
+  }
+  const fieldShort = { p1: "Platz 1", p2: "Platz 2", p3: "Platz 3" };
+  const zoneShort = { p2_voll: "ganz", h_ob: "Ob", h_ha: "Ha", v1: "V1", v2: "V2", v3: "V3", v4: "V4", h1: "H1", h2: "H2", voll: "" };
+
+  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const W = 210, H = 297, M = 15;
+  let y = M;
+
+  const kindLabel = (b) => b.kind === "match" ? `Heimspiel${b.opponent ? " vs. " + b.opponent : ""}` : b.kind === "turnier" ? "Turnier" : "Training";
+  const fmtDate = (dstr) => { const d = new Date(dstr + "T12:00"); return `${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`; };
+
+  pdf.setFont("helvetica", "bold"); pdf.setFontSize(15); pdf.setTextColor(15, 110, 62);
+  pdf.text(`SV Dörfleins – ${teamName}`, M, y); y += 6;
+  pdf.setFont("helvetica", "normal"); pdf.setFontSize(10); pdf.setTextColor(90, 90, 90);
+  pdf.text(`Zeitraum: ${rangeLabel}`, M, y); y += 9;
+
+  const colX = { date: M, time: M + 40, field: M + 66, art: M + 96 };
+  const ensureSpace = (needed) => { if (y + needed > H - M) { pdf.addPage(); y = M; } };
+  const tableHead = () => {
+    pdf.setFillColor(15, 110, 62);
+    pdf.rect(M, y - 4, W - 2 * M, 6, "F");
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(9); pdf.setTextColor(255, 255, 255);
+    pdf.text("Datum", colX.date + 1, y);
+    pdf.text("Zeit", colX.time + 1, y);
+    pdf.text("Platz", colX.field + 1, y);
+    pdf.text("Art / Details", colX.art + 1, y);
+    y += 6;
+  };
+
+  const section = (title, list, color) => {
+    ensureSpace(14);
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(12); pdf.setTextColor(color[0], color[1], color[2]);
+    pdf.text(`${title} (${list.length})`, M, y); y += 6;
+    if (list.length === 0) {
+      pdf.setFont("helvetica", "normal"); pdf.setFontSize(10); pdf.setTextColor(140, 140, 140);
+      pdf.text("Keine Einträge.", M, y); y += 10;
+      return;
+    }
+    ensureSpace(9);
+    tableHead();
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(9); pdf.setTextColor(30, 30, 30);
+    list.forEach((b, i) => {
+      ensureSpace(6.5);
+      if (i % 2 === 1) { pdf.setFillColor(246, 245, 240); pdf.rect(M, y - 4, W - 2 * M, 6, "F"); }
+      const z = zoneShort[b.zone] ? " ·" + zoneShort[b.zone] : "";
+      pdf.setTextColor(30, 30, 30);
+      pdf.text(fmtDate(b.date), colX.date + 1, y);
+      pdf.text(`${b.start}–${b.end}`, colX.time + 1, y);
+      pdf.text(`${fieldShort[b.field] || b.field}${z}`, colX.field + 1, y);
+      const art = pdf.splitTextToSize(kindLabel(b), W - M - colX.art - 2);
+      pdf.text(art[0], colX.art + 1, y);
+      y += 6;
+    });
+    y += 5;
+  };
+
+  section("Offene Anträge", requests, [180, 83, 9]);
+  section("Bestätigte Belegungen", confirmed, [15, 110, 62]);
+
+  pdf.save(`Team-${teamName.replace(/[^A-Za-z0-9]+/g, "_")}-Liste.pdf`);
+}
 // extras liefert Zusatzinfos (Notizen, Mähplan, Sperren) für die Symbol-Zeile, analog zum Monatsplan.
 async function exportWeekPDF(weekDays, entriesForDay, irrDays, extras = {}) {
   const { notes, maehplan, maehSignups, maehKw, lockForDayField, awayGamesForDay } = extras;
@@ -2001,6 +2070,7 @@ const ADMIN_MENU = [
     ["trainingstage", "Trainingstage freigeben"],
     ["konflikte", "Konflikte"],
     ["statistik", "Statistik"],
+    ["team_liste", "Mannschaft: Liste"],
   ] },
   { group: "Kommunikation", items: [
     ["nachrichten", "Nachrichten"],
@@ -2100,6 +2170,7 @@ function AdminPanel({ initialTab, days, bookings, bookingsByDay, addBooking, add
       {tab === "verwalten" && <BookingManager bookings={bookings} removeBooking={removeBooking} removeSeries={removeSeries} onMove={onMove} />}
       {tab === "konflikte" && <ConflictOverview bookings={bookings} removeBooking={removeBooking} onMove={onMove} />}
       {tab === "statistik" && <StatsPanel bookings={bookings} />}
+      {tab === "team_liste" && <TeamListReport bookings={bookings} />}
       {tab === "sperre" && <LockForm locks={locks} addLock={addLock} removeLock={removeLock} />}
       {tab === "trainingstage" && <TrainDayApproval bookings={bookings} setBookingStatus={setBookingStatus} approveSeries={approveSeries} moveBooking={moveBooking} removeBooking={removeBooking} removeSeries={removeSeries} addMessage={addMessage} />}
       {tab === "nachrichten" && <MessageInbox messages={messages} setMessageDone={setMessageDone} removeMessage={removeMessage} users={users} addMessage={addMessage} />}
@@ -2183,6 +2254,66 @@ function ConflictOverview({ bookings, removeBooking, onMove }) {
 }
 
 /* ---------------- Statistik ---------------- */
+// Belegungen + offene Anträge EINER Mannschaft als Liste, mit PDF-Export.
+function TeamListReport({ bookings }) {
+  const fieldShort = { p1: "Platz 1", p2: "Platz 2", p3: "Platz 3" };
+  const zoneShort = { p2_voll: "ganz", h_ob: "Ob", h_ha: "Ha", v1: "V1", v2: "V2", v3: "V3", v4: "V4", h1: "H1", h2: "H2", voll: "" };
+  const [teamId, setTeamId] = useState(TEAMS[0]?.id || "");
+  const [from, setFrom] = useState(dayKey(new Date()));
+  const [to, setTo] = useState("");
+
+  const filtered = bookings
+    .filter((b) => b.team === teamId)
+    .filter((b) => !from || b.date >= from)
+    .filter((b) => !to || b.date <= to);
+  const requests = filtered.filter((b) => b.status === "beantragt").sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+  const confirmed = filtered.filter((b) => b.status !== "beantragt").sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+  const team = teamById(teamId);
+
+  const rangeLabel = `${from ? new Date(from + "T12:00").toLocaleDateString("de-DE") : "Anfang"} – ${to ? new Date(to + "T12:00").toLocaleDateString("de-DE") : "unbegrenzt"}`;
+
+  const Row = ({ b }) => {
+    const z = zoneShort[b.zone] ? " · " + zoneShort[b.zone] : "";
+    const d = new Date(b.date + "T12:00");
+    return (
+      <div style={S.listRow}>
+        <span>
+          <b>{d.getDate()}.{d.getMonth() + 1}.{d.getFullYear()}</b> · {b.start}–{b.end} · {fieldShort[b.field] || b.field}{z} ·{" "}
+          {b.kind === "match" ? `Heimspiel${b.opponent ? " vs. " + b.opponent : ""}` : b.kind === "turnier" ? "Turnier" : "Training"}
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <p style={{ fontSize: 13, color: C.textSec, marginTop: 0 }}>
+        Belegungen und offene Anträge einer einzelnen Mannschaft ansehen und als PDF ausdrucken.
+      </p>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+        <Field label="Mannschaft">
+          <select value={teamId} onChange={(e) => setTeamId(e.target.value)} style={S.select}>
+            {TEAMS.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Von"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={S.select} /></Field>
+        <Field label="Bis (leer = unbegrenzt)"><input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={S.select} /></Field>
+      </div>
+      <button style={S.primaryBtn} onClick={() => exportTeamListPDF(team?.name || teamId, requests, confirmed, rangeLabel)}>
+        ⬇ Als PDF exportieren
+      </button>
+
+      <h4 style={{ marginTop: 20 }}>Offene Anträge ({requests.length})</h4>
+      {requests.length === 0 && <p style={{ fontSize: 13, color: C.textSec }}>Keine offenen Anträge im Zeitraum.</p>}
+      {requests.map((b) => <Row key={b.id} b={b} />)}
+
+      <h4 style={{ marginTop: 20 }}>Bestätigte Belegungen ({confirmed.length})</h4>
+      {confirmed.length === 0 && <p style={{ fontSize: 13, color: C.textSec }}>Keine Belegungen im Zeitraum.</p>}
+      {confirmed.map((b) => <Row key={b.id} b={b} />)}
+    </div>
+  );
+}
+
 function StatsPanel({ bookings }) {
   const today = new Date();
   const iso = (d) => dayKey(d);

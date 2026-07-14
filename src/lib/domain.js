@@ -192,6 +192,32 @@ const fullZoneOf = (fieldId) => {
   const f = fieldById(fieldId);
   return f ? f.zones[0].id : null;
 };
+
+// Dieselbe Auto-Aufwärm-Regel wie im manuellen Heimspiel-Formular, aber für ganze
+// Stapel von (importierten) Spielen: Platz 2 → immer Aufwärmen auf Platz 3.
+// Platz 1 → Aufwärmen auf Platz 2, falls am selben Tag ein anderes Heimspiel auf
+// Platz 1 endet, das ≤45 Min vor dem Anpfiff dieses Spiels liegt. Bereits gesetzte
+// warmupField-Werte (z. B. manuell korrigiert) werden nie überschrieben.
+export function applyWarmupSuggestions(newBookings, existingBookings) {
+  const toMin = (t) => { const [h, m] = (t || "0:0").split(":").map(Number); return h * 60 + m; };
+  const allMatches = [...(existingBookings || []), ...newBookings].filter(
+    (b) => b.kind === "match" && b.status !== "beantragt"
+  );
+  return newBookings.map((b) => {
+    if (b.kind !== "match" || b.warmupField) return b;
+    if (b.field === "p2") return { ...b, warmupField: "p3" };
+    if (b.field === "p1") {
+      const newStart = toMin(b.start);
+      const clash = allMatches.some((o) =>
+        o !== b && o.field === "p1" && o.date === b.date &&
+        !(o.start === b.start && o.end === b.end) &&
+        toMin(o.end) <= newStart && newStart - toMin(o.end) <= 45
+      );
+      if (clash) return { ...b, warmupField: "p2" };
+    }
+    return b;
+  });
+}
 export const warmupBlockFor = (match) => {
   if (!match || match.kind !== "match") return null;
   if (!match.warmupField || match.warmupField === match.field) return null;

@@ -487,10 +487,19 @@ export default function App() {
   }, [bookings]);
 
   const entriesForDay = useCallback(
-    (date) => [
-      ...autoTrainingForDay(date),
-      ...(bookingsByDay[dayKey(date)] || []).filter((b) => b.status !== "beantragt"),
-    ],
+    (date) => {
+      const base = [
+        ...autoTrainingForDay(date),
+        ...(bookingsByDay[dayKey(date)] || []).filter((b) => b.status !== "beantragt"),
+      ];
+      // Für Heimspiele mit "Aufwärmen auf anderem Platz" den Aufwärm-Block als
+      // eigenen (synthetischen) Eintrag ergänzen – sonst blockiert er den anderen
+      // Platz nirgends wirklich und Doppelbelegungen dort würden nicht auffallen.
+      const warmups = base
+        .map((b) => warmupBlockFor(b))
+        .filter(Boolean);
+      return [...base, ...warmups];
+    },
     [bookingsByDay]
   );
 
@@ -2108,7 +2117,11 @@ function AdminPanel({ initialTab, days, bookings, bookingsByDay, addBooking, add
   const conflictDayCount = (() => {
     const today = dayKey(new Date());
     const byDay = {};
-    bookings.filter((b) => b.status !== "beantragt" && b.date >= today).forEach((b) => { (byDay[b.date] ||= []).push(b); });
+    bookings.filter((b) => b.status !== "beantragt" && b.date >= today).forEach((b) => {
+      (byDay[b.date] ||= []).push(b);
+      const wb = warmupBlockFor(b);
+      if (wb) (byDay[b.date] ||= []).push(wb);
+    });
     let n = 0;
     Object.values(byDay).forEach((list) => { if (conflictIdsForEntries(list).size > 0) n++; });
     return n;
@@ -2202,7 +2215,11 @@ function ConflictOverview({ bookings, removeBooking, onMove }) {
   const byDay = {};
   bookings
     .filter((b) => b.status !== "beantragt" && b.date >= today)
-    .forEach((b) => { (byDay[b.date] ||= []).push(b); });
+    .forEach((b) => {
+      (byDay[b.date] ||= []).push(b);
+      const wb = warmupBlockFor(b);
+      if (wb) (byDay[b.date] ||= []).push(wb);
+    });
 
   const days = Object.keys(byDay).sort();
   const conflictDays = [];
@@ -2211,14 +2228,14 @@ function ConflictOverview({ bookings, removeBooking, onMove }) {
     const pairs = [];
     for (let i = 0; i < list.length; i++)
       for (let j = i + 1; j < list.length; j++)
-        if (zonesOverlap(list[i], list[j]) && timeOverlap(list[i], list[j]))
+        if (zonesOverlap(list[i], list[j]) && timeOverlap(list[i], list[j], list))
           pairs.push([list[i], list[j]]);
     if (pairs.length) conflictDays.push({ dk, pairs });
   });
 
   const total = conflictDays.reduce((n, d) => n + d.pairs.length, 0);
 
-  const line = (b) => `${teamById(b.team)?.name || b.team} · ${fieldById(b.field)?.name} (${zoneText(b.field, b.zone)}) · ${b.start}–${b.end}${b.kind === "match" ? " · Heimspiel" : b.kind === "turnier" ? " · Turnier" : ""}`;
+  const line = (b) => `${teamById(b.team)?.name || b.team} · ${fieldById(b.field)?.name} (${zoneText(b.field, b.zone)}) · ${b.start}–${b.end}${b.kind === "match" ? " · Heimspiel" : b.kind === "turnier" ? " · Turnier" : b.kind === "warmup" ? " · Aufwärmen" : ""}`;
 
   return (
     <div>

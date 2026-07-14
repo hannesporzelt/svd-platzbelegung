@@ -5,7 +5,7 @@ import {
   autoTrainingForDay, findConflicts, conflictIdsForEntries, effectiveSpan, warmupBlockFor,
   zonesOverlap, timeOverlap,
   buildIrrigationWindows, findIrrigationOverlaps, unionIrrigationDays, passDurationSec, kickoffToStart, computeMatchIrrigation,
-  homeGamesFromIcs, icsGamesToBookings, awayGamesFromIcs, icsGamesToAwayGames,
+  homeGamesFromIcs, icsGamesToBookings, awayGamesFromIcs, icsGamesToAwayGames, applyWarmupSuggestions,
 } from "./lib/domain";
 import { useAuth } from "./lib/auth";
 import { useBookings, useAwayGames, useLocks, useMessages, useUsers, useNotes, useIrrigation } from "./lib/data";
@@ -3094,8 +3094,9 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
         }
         const parts = [];
         if (allHome.length > 0) {
-          const newBookings = [];
+          let newBookings = [];
           allHome.forEach((g) => icsGamesToBookings([g], g.team).forEach((b) => newBookings.push(b)));
+          newBookings = applyWarmupSuggestions(newBookings, bookings);
           const n = await importBookings(newBookings, bookings);
           if (n > 0) parts.push(`${n} Heimspiel(e)`);
         }
@@ -3162,10 +3163,11 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
     try {
       const parts = [];
       if (games.length > 0) {
-        const newBookings = [];
+        let newBookings = [];
         games.forEach((g) => {
           icsGamesToBookings([g], g.team).forEach((b) => newBookings.push(b));
         });
+        newBookings = applyWarmupSuggestions(newBookings, bookings);
         const n = await importBookings(newBookings, bookings);
         parts.push(`${n} Heimspiel(e)`);
       }

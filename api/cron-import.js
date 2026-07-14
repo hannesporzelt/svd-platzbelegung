@@ -116,6 +116,14 @@ export default async function handler(req, res) {
 
     const today = todayKeyBerlin();
 
+    // Bestehende künftige Heimspiele auf Platz 1 laden – für die Aufwärm-Regel unten.
+    // Bewusst NUR Gleichheitsfilter (field, kind) in der Firestore-Abfrage, damit kein
+    // zusammengesetzter Index in der Firebase-Konsole angelegt werden muss; der
+    // Datumsfilter (>= heute) passiert danach einfach in JavaScript.
+    const existingP1Snap = await db.collection("bookings")
+      .where("field", "==", "p1").where("kind", "==", "match").get();
+    const existingP1 = existingP1Snap.docs.map((d) => d.data()).filter((b) => b.date >= today);
+
     // 3. Alle Spiele (Heim + Auswärts) aus allen Kalendern sammeln
     const games = [];
     for (const c of list) {
@@ -126,6 +134,26 @@ export default async function handler(req, res) {
         gamesFromIcs(text, today).forEach((g) => games.push({ ...g, team: c.team }));
       } catch { /* Kalender überspringen */ }
     }
+
+    // Aufwärm-Vorschlag bestimmen (dieselbe Regel wie im manuellen Formular):
+    // Platz 2 → immer Aufwärmen auf Platz 3. Platz 1 → Aufwärmen auf Platz 2, falls
+    // ein anderes Heimspiel (neu oder schon gespeichert) am selben Tag auf Platz 1
+    // endet, das ≤45 Min vor dem Anpfiff dieses Spiels liegt.
+    const toMin = (t) => { const [h, m] = (t || "0:0").split(":").map(Number); return h * 60 + m; };
+    const p1Pool = [...existingP1, ...games.filter((g) => g.isHome && g.field === "p1")];
+    const warmupFor = (g) => {
+      if (g.field === "p2") return "p3";
+      if (g.field === "p1") {
+        const newStart = toMin(g.time);
+        const clash = p1Pool.some((o) =>
+          o !== g && o.date === g.date &&
+          !((o.start || o.time) === g.time && (o.end || o.endTime) === g.endTime) &&
+          toMin(o.end || o.endTime) <= newStart && newStart - toMin(o.end || o.endTime) <= 45
+        );
+        if (clash) return "p2";
+      }
+      return null;
+    };
 
     // 4. NUR NEUE anlegen (bestehende nie ändern) – Heimspiele -> bookings, Auswärtsspiele -> awayGames
     let added = 0;
@@ -143,6 +171,7 @@ export default async function handler(req, res) {
           zone: g.field === "p1" ? "voll" : "h1",
           team: g.team, start: g.time, end: g.endTime || addMin(g.time, 100),
           kind: "match", status: "frei", title: g.title, opponent: g.guest || "",
+          ...(warmupFor(g) ? { warmupField: warmupFor(g) } : {}),
           bfvUid: g.uid, source: "bfv", ownerUid: "cron",
         });
         added++;

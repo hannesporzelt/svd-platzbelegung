@@ -222,6 +222,7 @@ export const warmupBlockFor = (match) => {
   if (!match || match.kind !== "match") return null;
   if (!match.warmupField || match.warmupField === match.field) return null;
   return {
+    id: (match.id || "match") + "_warmup",
     date: match.date,
     field: match.warmupField,
     zone: fullZoneOf(match.warmupField),
@@ -230,6 +231,7 @@ export const warmupBlockFor = (match) => {
     end: match.start,
     kind: "warmup",
     status: match.status || "frei",
+    auto: true, // synthetisch – kein eigenes Firestore-Dokument, nicht löschbar/verschiebbar
   };
 };
 

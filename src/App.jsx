@@ -687,6 +687,8 @@ export default function App() {
             setActiveField={setActiveField}
             entriesForDay={entriesForDay}
             lockForDayField={lockForDayField}
+            teamFilter={teamFilter}
+            myTeams={myTeams}
           />
         </>
       )}
@@ -963,7 +965,7 @@ function LoginOverlay({ onClose, loginEmail, resetPassword, registerEmail, login
       await loginEmail(email, pw, rememberMe);
       onClose();
     } catch (e) {
-      if (!email.trim() && loginAdminPin(pw)) { onClose(); return; }
+      if (!email.trim() && (await loginAdminPin(pw))) { onClose(); return; }
       setErr("Anmeldung fehlgeschlagen. Bitte E-Mail und Passwort prüfen.");
     } finally {
       setBusy(false);
@@ -1804,13 +1806,18 @@ function Legend() {
 }
 
 /* ---------------- Platzansicht ---------------- */
-function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockForDayField }) {
+function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockForDayField, teamFilter, myTeams }) {
   const [dayIdx, setDayIdx] = useState(() => {
     const i = days.findIndex((d) => dayKey(d) === dayKey(new Date()));
     return i >= 0 ? i : 0;
   });
   const date = days[Math.min(dayIdx, 6)] || days[0];
-  const entries = entriesForDay(date).filter((e) => e.field === activeField);
+  const matchesFilter = (e) => {
+    if (!teamFilter || teamFilter === "all") return true;
+    if (teamFilter === "mine") return myTeams && myTeams.includes(e.team);
+    return e.team === teamFilter;
+  };
+  const entries = entriesForDay(date).filter((e) => e.field === activeField).filter(matchesFilter);
   const lock = lockForDayField(date, activeField);
   const zoneOccupants = (zoneId) => entries.filter((e) => zoneCovers(e.zone, zoneId));
 
@@ -1842,6 +1849,9 @@ function FieldVisual({ days, activeField, setActiveField, entriesForDay, lockFor
         {activeField === "p2"
           ? " Platz 2 ist in Viertel (Oberhaid: V1/V2, Hallstadt: V3/V4), Hälften oder ganz buchbar."
           : " Aufteilung nach Belegung."}
+        {teamFilter && teamFilter !== "all" && (
+          <> · <i>gefiltert: {teamFilter === "mine" ? "meine Mannschaften" : (teamById(teamFilter)?.name || teamFilter)}</i></>
+        )}
       </p>
     </div>
   );

@@ -452,20 +452,31 @@ export default function App() {
   const [msgsSeen, setMsgsSeen] = useState(false); // Login-Hinweis nur bis zum Ansehen zeigen
   const [trainerTeam, setTrainerTeam] = useState("u15");
 
+  // Stabiler Schlüssel statt der Array-Referenz von myTeams: myTeams kann bei
+  // jedem Render ein NEUES, aber inhaltsgleiches Array sein (z. B. bei PIN-
+  // Login ohne Profil: Array.isArray(...) ? ... : [] erzeugt sonst jedes Mal
+  // ein frisches leeres Array). Effekte, die direkt auf myTeams als Dependency
+  // hören würden, feuerten dadurch bei JEDEM Render neu – mit potenziell
+  // sichtbaren Nebenwirkungen (z. B. eine manuell gewählte Mannschaft im
+  // Wochenraster-Filter, die sofort wieder auf "Alle" zurückspringt).
+  const myTeamsKey = (myTeams || []).join(",");
+
   // Wenn ein Trainer eingeloggt ist: erstes zugeordnetes Team vorauswählen
   React.useEffect(() => {
     if (isTrainer && myTeams.length > 0 && !myTeams.includes(trainerTeam)) {
       setTrainerTeam(myTeams[0]);
     }
-  }, [isTrainer, myTeams]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTrainer, myTeamsKey]);
   const [weekStart, setWeekStart] = useState(mondayOf(new Date()));
   const [activeField, setActiveField] = useState("p2");
   const [teamFilter, setTeamFilter] = useState("all"); // "all" | "mine" | teamId
-  // Trainer sehen beim Anmelden zunächst nur ihre Mannschaften
+  // Trainer sehen beim Anmelden zunächst nur ihre Mannschaften.
   React.useEffect(() => {
     if (isTrainer && myTeams && myTeams.length > 0) setTeamFilter("mine");
     else setTeamFilter("all");
-  }, [isTrainer, myTeams]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTrainer, myTeamsKey]);
   const [calMode, setCalMode] = useState("woche"); // woche | monat
   const [monthAnchor, setMonthAnchor] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); return d; });
   const [moveTarget, setMoveTarget] = useState(null); // Belegung, die im Plan verschoben wird

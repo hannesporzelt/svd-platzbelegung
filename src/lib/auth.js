@@ -11,11 +11,16 @@ import {
   browserLocalPersistence,
   browserSessionPersistence,
 } from "firebase/auth";
-import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
 const ADMIN_PASSWORD_FALLBACK = import.meta.env.VITE_ADMIN_PASSWORD || "1901";
 const ADMIN_FLAG = "svd_isAdmin";
+// Stabile Referenz statt bei jedem Aufruf ein neues leeres Array zu erzeugen –
+// sonst denkt React bei jedem Render "myTeams hat sich geändert" (neues Array-
+// Objekt, gleicher Inhalt) und Effekte, die auf myTeams reagieren, feuern
+// ständig unnötig neu.
+const EMPTY_TEAMS = [];
 
 export function useAuth() {
   const [user, setUser] = useState(null);
@@ -113,16 +118,28 @@ export function useAuth() {
     sessionStorage.removeItem(ADMIN_FLAG);
     setPinAdmin(false);
     setProfile(null);
+    if (auth.currentUser) {
+      try { await deleteDoc(doc(db, "platzwartSessions", auth.currentUser.uid)); } catch { /* egal, war evtl. nie da */ }
+    }
     await signOut(auth);
   };
 
-  const loginAdminPin = (pw) => {
-    if (pw === pin) {
-      sessionStorage.setItem(ADMIN_FLAG, "1");
-      setPinAdmin(true);
-      return true;
+  // Setzt den Platzwart-Zugang per Notfall-PIN. Schreibt dafür einen echten
+  // Nachweis in Firestore (platzwartSessions/{uid}) – Firestore prüft die PIN
+  // dabei SELBST serverseitig gegen den echten Wert (siehe firestore.rules).
+  // Ohne diesen Schritt galt "Platzwart" bisher nur im Browser: Anlegen eigener
+  // Einträge klappte, Löschen/Ändern fremder (z. B. einer genehmigten Trainer-
+  // Serie) wurde von Firestore im Hintergrund abgelehnt.
+  const loginAdminPin = async (pw) => {
+    if (pw !== pin) return false;
+    try {
+      await setDoc(doc(db, "platzwartSessions", auth.currentUser.uid), { pin: pw, grantedAt: Date.now() });
+    } catch {
+      return false; // Firestore hat serverseitig abgelehnt (z. B. PIN inzwischen geändert)
     }
-    return false;
+    sessionStorage.setItem(ADMIN_FLAG, "1");
+    setPinAdmin(true);
+    return true;
   };
 
   const changePin = async (neuePin) => {
@@ -151,7 +168,7 @@ export function useAuth() {
     notes: hasRight("notes"),
   };
   const canEditIrrigation = can.irrigation;
-  const myTeams = Array.isArray(profile?.teams) ? profile.teams : [];
+  const myTeams = Array.isArray(profile?.teams) ? profile.teams : EMPTY_TEAMS;
   const isLoggedIn = !!user && !user.isAnonymous;
 
   return {

@@ -398,10 +398,18 @@ const fieldFromLocation = (loc) => {
 
 // Heim-/Gastmannschaft aus dem Titel "Heim-Gast, Wettbewerb, ..."
 const teamsFromSummary = (sum) => {
-  const firstPart = (sum || "").split(",")[0]; // "SV Dörfleins-SC Kemmern"
-  const dash = firstPart.indexOf("-");
-  if (dash < 0) return { home: firstPart.trim(), guest: "" };
-  return { home: firstPart.slice(0, dash).trim(), guest: firstPart.slice(dash + 1).trim() };
+  const firstPart = (sum || "").split(",")[0]; // "SV Dörfleins - SC Kemmern"
+  // Wichtig: nach " - " (mit Leerzeichen) trennen, NICHT nur nach "-" – sonst
+  // reißt ein Bindestrich MITTEN im Vereinsnamen (z. B. "JFG Main-Kreuzberg
+  // Kickers") die Heim-/Gastmannschaft an der falschen Stelle auseinander.
+  const dash = firstPart.indexOf(" - ");
+  if (dash >= 0) {
+    return { home: firstPart.slice(0, dash).trim(), guest: firstPart.slice(dash + 3).trim() };
+  }
+  // Fallback, falls ausnahmsweise kein Leerzeichen-Bindestrich vorkommt
+  const bare = firstPart.indexOf("-");
+  if (bare < 0) return { home: firstPart.trim(), guest: "" };
+  return { home: firstPart.slice(0, bare).trim(), guest: firstPart.slice(bare + 1).trim() };
 };
 
 // Parst kompletten ICS-Text -> Array aller Spiele

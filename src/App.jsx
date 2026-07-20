@@ -845,6 +845,7 @@ export default function App() {
           addMessage={addMessage}
           removeBooking={removeBooking}
           irrigation={irrigation}
+          profile={profile}
         />
       )}
 
@@ -1242,7 +1243,7 @@ function PlatzwartDashboard({
   bookings, messages, locks, days, entriesForDay,
   pendingCount, weekConflictCount, openMsgCount, todayMatchIrr,
   maehplan, maehSignups, maehKw, setView, setAdminTab,
-  setBookingStatus, approveSeries, addMessage, removeBooking, irrigation,
+  setBookingStatus, approveSeries, addMessage, removeBooking, irrigation, profile,
 }) {
   // Direkt in einen bestimmten Admin-Tab springen, statt nur allgemein "Admin" zu öffnen
   const goAdmin = (t) => { setAdminTab(t); setView("admin"); };
@@ -1308,7 +1309,7 @@ function PlatzwartDashboard({
       {/* Begrüßung */}
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 22, color: C.brand }}>
-          {today.getHours() < 12 ? "Guten Morgen" : today.getHours() < 18 ? "Guten Tag" : "Guten Abend"} 👋
+          {today.getHours() < 12 ? "Guten Morgen" : today.getHours() < 18 ? "Guten Tag" : "Guten Abend"}{profile?.name ? `, ${profile.name.split(" ")[0]}` : ""} 👋
         </h2>
         <div style={{ fontSize: 13, color: C.textSec }}>
           {today.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
@@ -1515,7 +1516,15 @@ function PlatzwartDashboard({
           {[
             ["📅 Kalender", "viewer", null],
             ["✏️ Belegung eintragen", "admin", "belegung"],
+            ["⚽ Heimspiel eintragen", "admin", "spiel"],
+            ["🏆 Turnier eintragen", "admin", "turnier"],
+            ["🚌 Auswärtsspiel eintragen", "admin", "auswaerts"],
+            ["🚧 Platzsperre eintragen", "admin", "sperre"],
+            ["📋 Belegungen verwalten", "admin", "verwalten"],
             ["📬 Anträge freigeben", "admin", "trainingstage"],
+            ["⚠️ Konflikte", "admin", "konflikte"],
+            ["📊 Statistik", "admin", "statistik"],
+            ["📄 Mannschaft: Liste", "admin", "team_liste"],
             ["💬 Nachrichten", "admin", "nachrichten"],
             ["🌿 Mähplan", "maehplan", null],
             ["💧 Beregnung", "admin", "beregnung"],

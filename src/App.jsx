@@ -952,11 +952,11 @@ function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, r
   const teamOptions = (role === "trainer" && myTeams.length > 0)
     ? TEAMS.filter((t) => myTeams.includes(t.id))
     : TEAMS;
-  const roleLabel = view === "maehplan" ? "Mähplan" : view === "dashboard" ? "Dashboard" : view === "vorstand" ? "Vorstand" : view === "admin" ? "Platzwart" : view === "trainer" ? "Trainer" : "Betrachter";
+  const roleLabel = view === "maehplan" ? "Mähplan" : view === "dashboard" ? "Platzwart" : view === "vorstand" ? "Vorstand" : view === "admin" ? "Platzwart" : view === "trainer" ? "Trainer" : "Betrachter";
 
   const ROLES = [
     ["viewer", "Betrachter"], ["trainer", "Trainer"],
-    ...(isPlatzwart ? [["dashboard", "Dashboard"], ["admin", "Platzwart-Bereich"]] : []),
+    ...(isPlatzwart ? [["dashboard", "Platzwart"]] : []),
     ...(isVorstand ? [["vorstand", "Vorstand"]] : []),
     ...(maehplanOn && isPlatzwart ? [["maehplan", "Mähplan"]] : []),
   ];

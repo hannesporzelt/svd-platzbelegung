@@ -203,8 +203,9 @@ async function exportTeamListPDF(teamName, requests, confirmed, rangeLabel) {
   pdf.save(`Team-${teamName.replace(/[^A-Za-z0-9]+/g, "_")}-Liste.pdf`);
 }
 // extras liefert Zusatzinfos (Notizen, Mähplan, Sperren) für die Symbol-Zeile, analog zum Monatsplan.
-// Separater Auswärtsspielplan als PDF (DIN A4 hoch): alle Auswärtsspiele ALLER
-// Mannschaften für einen Monat, chronologisch, mit automatischem Seitenumbruch.
+// Separater Auswärtsspielplan als PDF – DIN A4 QUER im Kalenderraster, genau wie
+// die normale Monatsübersicht, aber nur mit Auswärtsspielen. Tage mit einem
+// Auswärtsspiel werden deutlich hervorgehoben (violetter Hintergrund + Rahmen).
 async function exportAwayMonthPDF(monthAnchor, awayGames) {
   let jsPDF;
   try {
@@ -213,55 +214,80 @@ async function exportAwayMonthPDF(monthAnchor, awayGames) {
     window.alert(e.message || "PDF konnte nicht erstellt werden.");
     return;
   }
-  const year = monthAnchor.getFullYear(), month = monthAnchor.getMonth();
-  const monthStart = `${year}-${String(month + 1).padStart(2, "0")}-01`;
-  const monthEnd = `${year}-${String(month + 1).padStart(2, "0")}-31`;
-  const games = (awayGames || [])
-    .filter((g) => g.date >= monthStart && g.date <= monthEnd)
-    .sort((a, b) => (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
+  const year = monthAnchor.getFullYear();
+  const month = monthAnchor.getMonth();
+  const first = new Date(year, month, 1);
+  const gridStart = mondayOf(first);
+  const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+  const usedRows = cells.some((d, i) => i >= 35 && d.getMonth() === month) ? 6 : 5;
+  const shown = cells.slice(0, usedRows * 7);
 
-  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-  const W = 210, H = 297, M = 15;
-  let y = M;
-  const monthName = monthAnchor.toLocaleDateString("de-DE", { month: "long", year: "numeric" });
-
-  pdf.setFont("helvetica", "bold"); pdf.setFontSize(16); pdf.setTextColor(91, 33, 182);
-  pdf.text(`SV Dörfleins – Auswärtsspielplan ${monthName}`, M, y); y += 9;
-
-  const colX = { date: M, time: M + 32, team: M + 58, opp: M + 98, venue: M + 150 };
-  const ensureSpace = (needed) => { if (y + needed > H - M) { pdf.addPage(); y = M; } };
-  const tableHead = () => {
-    pdf.setFillColor(91, 33, 182);
-    pdf.rect(M, y - 4, W - 2 * M, 6, "F");
-    pdf.setFont("helvetica", "bold"); pdf.setFontSize(8.5); pdf.setTextColor(255, 255, 255);
-    pdf.text("Datum", colX.date + 1, y);
-    pdf.text("Zeit", colX.time + 1, y);
-    pdf.text("Mannschaft", colX.team + 1, y);
-    pdf.text("Gegner", colX.opp + 1, y);
-    pdf.text("Ort", colX.venue + 1, y);
-    y += 6;
+  const gamesForDay = (d) => {
+    const dk = dayKey(d);
+    return (awayGames || []).filter((g) => g.date === dk).sort((a, b) => (a.start || "").localeCompare(b.start || ""));
   };
 
-  if (games.length === 0) {
-    pdf.setFont("helvetica", "normal"); pdf.setFontSize(11); pdf.setTextColor(140, 140, 140);
-    pdf.text("Keine Auswärtsspiele in diesem Monat.", M, y);
-  } else {
-    ensureSpace(9);
-    tableHead();
-    pdf.setFont("helvetica", "normal"); pdf.setFontSize(8.5);
-    games.forEach((g, i) => {
-      ensureSpace(7);
-      if (i % 2 === 1) { pdf.setFillColor(246, 243, 255); pdf.rect(M, y - 4, W - 2 * M, 6, "F"); }
-      pdf.setTextColor(30, 30, 30);
-      const d = new Date(g.date + "T12:00");
-      pdf.text(`${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}.`, colX.date + 1, y);
-      pdf.text(g.start || "–", colX.time + 1, y);
-      pdf.text(pdf.splitTextToSize(teamById(g.team)?.name || g.team || "", colX.opp - colX.team - 2)[0], colX.team + 1, y);
-      pdf.text(pdf.splitTextToSize(g.opponent || "–", colX.venue - colX.opp - 2)[0], colX.opp + 1, y);
-      pdf.text(pdf.splitTextToSize(g.venue || "", W - M - colX.venue - 2)[0], colX.venue + 1, y);
-      y += 6;
-    });
-  }
+  const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const W = 297, H = 210, M = 8;
+  const gridW = W - 2 * M;
+  const colW = gridW / 7;
+  const headerY = M + 8;
+  const gridTop = headerY + 6;
+  const gridH = H - gridTop - M;
+  const rowH = gridH / usedRows;
+
+  pdf.setFont("helvetica", "bold"); pdf.setFontSize(15); pdf.setTextColor(91, 33, 182);
+  pdf.text(`SV Dörfleins – Auswärtsspielplan · ${MONTHS_PDF[month]} ${year}`, M, M + 4);
+
+  pdf.setFontSize(9); pdf.setTextColor(95, 94, 90);
+  WEEKDAYS.forEach((w, i) => { pdf.text(w, M + i * colW + 1.5, headerY + 3); });
+
+  const todayKeyStr = dayKey(new Date());
+  pdf.setDrawColor(200);
+
+  shown.forEach((d, idx) => {
+    const r = Math.floor(idx / 7), c = idx % 7;
+    const x = M + c * colW, y = gridTop + r * rowH;
+    const inMonth = d.getMonth() === month;
+    const isToday = dayKey(d) === todayKeyStr;
+    const games = gamesForDay(d);
+    const hasGames = games.length > 0;
+
+    // Hintergrund: Auswärtsspiel-Tage deutlich hervorgehoben, sonst neutral
+    if (hasGames) { pdf.setFillColor(237, 231, 250); pdf.rect(x, y, colW, rowH, "F"); }
+    else if (!inMonth) { pdf.setFillColor(245, 244, 239); pdf.rect(x, y, colW, rowH, "F"); }
+    else if (isToday) { pdf.setFillColor(238, 247, 240); pdf.rect(x, y, colW, rowH, "F"); }
+    // Rahmen: violett und dicker bei Auswärtsspiel-Tagen, sonst normal
+    if (hasGames) { pdf.setDrawColor(124, 58, 237); pdf.setLineWidth(0.6); pdf.rect(x, y, colW, rowH, "S"); pdf.setLineWidth(0.2); pdf.setDrawColor(200); }
+    else { pdf.rect(x, y, colW, rowH, "S"); }
+
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(9);
+    pdf.setTextColor(inMonth ? (hasGames ? 91 : 28) : 150, inMonth ? (hasGames ? 33 : 28) : 150, inMonth ? (hasGames ? 182 : 26) : 150);
+    pdf.text(String(d.getDate()), x + 1.5, y + 4);
+
+    if (!hasGames) return;
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(6.5);
+    let ey = y + 8;
+    const lineH = 2.8;
+    const cellBottom = y + rowH - 1.3;
+    let shownCount = 0;
+    for (const g of games) {
+      const label1 = `${g.start || "?"} ${teamById(g.team)?.name || g.team}`;
+      const label2 = `bei ${g.opponent || "?"}`;
+      const lines1 = pdf.splitTextToSize(label1, colW - 4);
+      const lines2 = pdf.splitTextToSize(label2, colW - 4);
+      const totalLines = lines1.length + lines2.length;
+      if (ey + totalLines * lineH > cellBottom) break;
+      pdf.setTextColor(91, 33, 182); pdf.setFont("helvetica", "bold");
+      lines1.forEach((ln) => { pdf.text(ln, x + 1.5, ey); ey += lineH; });
+      pdf.setTextColor(70, 50, 110); pdf.setFont("helvetica", "normal");
+      lines2.forEach((ln) => { pdf.text(ln, x + 1.5, ey); ey += lineH; });
+      shownCount++;
+    }
+    if (games.length > shownCount && ey + lineH <= cellBottom + 1) {
+      pdf.setTextColor(120); pdf.text(`+${games.length - shownCount} weitere`, x + 1.5, ey);
+    }
+  });
 
   pdf.save(`Auswaertsspielplan-${year}-${String(month + 1).padStart(2, "0")}.pdf`);
 }
@@ -1583,7 +1609,7 @@ function WeekGrid({ days, entriesForDay, awayGamesForDay, lockForDayField, activ
                 <span style={{ color: C.textSec, fontSize: 12 }}>{d.getDate()}.{d.getMonth() + 1}.</span>
               </div>
               {awayGamesForDay && awayGamesForDay(d).map((g) => (
-                <div key={g.id} style={{ fontSize: 10, color: "#5b21b6", background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 5, padding: "2px 5px", marginBottom: 4, fontWeight: 500, overflowWrap: "anywhere" }}
+                <div key={g.id} style={{ fontSize: 11, color: "#4c1d95", background: "#ddd6fe", border: "1.5px solid #7c3aed", borderRadius: 5, padding: "3px 5px", marginBottom: 4, fontWeight: 700, overflowWrap: "anywhere" }}
                   title={g.venue ? `Ort: ${g.venue}` : undefined}>
                   🚌 {g.start} {teamById(g.team)?.name || g.team} bei {g.opponent}
                 </div>
@@ -2051,7 +2077,7 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, awayGamesForDay
         </div>
       )}
       {meta.away && meta.away.length > 0 && meta.away.map((g) => (
-        <div key={g.id} style={{ fontSize: size, color: "#5b21b6", background: "#f5f3ff", borderRadius: 4, padding: "1px 3px", marginBottom: 2, lineHeight: 1.2, overflowWrap: "anywhere" }}
+        <div key={g.id} style={{ fontSize: size + 0.5, color: "#4c1d95", background: "#ddd6fe", border: "1px solid #7c3aed", borderRadius: 4, padding: "1.5px 3px", marginBottom: 2, lineHeight: 1.25, fontWeight: 700, overflowWrap: "anywhere" }}
           title={g.venue ? `Ort: ${g.venue}` : undefined}>
           🚌 {g.start} {teamById(g.team)?.name || g.team} bei {g.opponent}
         </div>
@@ -2111,8 +2137,8 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, awayGamesForDay
             }
             return (
               <div key={dayKey(d)} ref={today ? todayRef : undefined}
-                style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", marginBottom: 6,
-                  background: today ? "#eef7f0" : C.surface }}>
+                style={{ border: meta.away.length > 0 ? "1.5px solid #7c3aed" : `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", marginBottom: 6,
+                  background: meta.away.length > 0 ? "#f5f3ff" : (today ? "#eef7f0" : C.surface) }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
                   <span style={{ fontSize: 15, fontWeight: 700, color: today ? C.brand : C.ink }}>{d.getDate()}.</span>
                   <span style={{ fontSize: 12, color: C.textSec }}>{wdLong}{today ? " · heute" : ""}</span>
@@ -2132,10 +2158,11 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, awayGamesForDay
             const inMonth = d.getMonth() === month;
             const today = dayKey(d) === dayKey(new Date());
             const meta = computeDayMeta(d);
+            const hasAway = meta.away.length > 0;
             return (
               <div key={dayKey(d)} style={{
-                border: `1px solid ${C.border}`, borderRadius: 8, minHeight: 92, padding: 5,
-                background: inMonth ? (today ? "#eef7f0" : C.surface) : "#f5f4ef",
+                border: hasAway ? "1.5px solid #7c3aed" : `1px solid ${C.border}`, borderRadius: 8, minHeight: 92, padding: 5,
+                background: hasAway ? "#f5f3ff" : (inMonth ? (today ? "#eef7f0" : C.surface) : "#f5f4ef"),
                 opacity: inMonth ? 1 : 0.55,
               }}>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3, color: today ? C.brand : C.ink }}>{d.getDate()}</div>

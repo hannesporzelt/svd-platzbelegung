@@ -203,6 +203,69 @@ async function exportTeamListPDF(teamName, requests, confirmed, rangeLabel) {
   pdf.save(`Team-${teamName.replace(/[^A-Za-z0-9]+/g, "_")}-Liste.pdf`);
 }
 // extras liefert Zusatzinfos (Notizen, Mähplan, Sperren) für die Symbol-Zeile, analog zum Monatsplan.
+// Separater Auswärtsspielplan als PDF (DIN A4 hoch): alle Auswärtsspiele ALLER
+// Mannschaften für einen Monat, chronologisch, mit automatischem Seitenumbruch.
+async function exportAwayMonthPDF(monthAnchor, awayGames) {
+  let jsPDF;
+  try {
+    jsPDF = await loadJsPDF();
+  } catch (e) {
+    window.alert(e.message || "PDF konnte nicht erstellt werden.");
+    return;
+  }
+  const year = monthAnchor.getFullYear(), month = monthAnchor.getMonth();
+  const monthStart = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const monthEnd = `${year}-${String(month + 1).padStart(2, "0")}-31`;
+  const games = (awayGames || [])
+    .filter((g) => g.date >= monthStart && g.date <= monthEnd)
+    .sort((a, b) => (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
+
+  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const W = 210, H = 297, M = 15;
+  let y = M;
+  const monthName = monthAnchor.toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+
+  pdf.setFont("helvetica", "bold"); pdf.setFontSize(16); pdf.setTextColor(91, 33, 182);
+  pdf.text(`SV Dörfleins – Auswärtsspielplan ${monthName}`, M, y); y += 9;
+
+  const colX = { date: M, time: M + 32, team: M + 58, opp: M + 98, venue: M + 150 };
+  const ensureSpace = (needed) => { if (y + needed > H - M) { pdf.addPage(); y = M; } };
+  const tableHead = () => {
+    pdf.setFillColor(91, 33, 182);
+    pdf.rect(M, y - 4, W - 2 * M, 6, "F");
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(8.5); pdf.setTextColor(255, 255, 255);
+    pdf.text("Datum", colX.date + 1, y);
+    pdf.text("Zeit", colX.time + 1, y);
+    pdf.text("Mannschaft", colX.team + 1, y);
+    pdf.text("Gegner", colX.opp + 1, y);
+    pdf.text("Ort", colX.venue + 1, y);
+    y += 6;
+  };
+
+  if (games.length === 0) {
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(11); pdf.setTextColor(140, 140, 140);
+    pdf.text("Keine Auswärtsspiele in diesem Monat.", M, y);
+  } else {
+    ensureSpace(9);
+    tableHead();
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(8.5);
+    games.forEach((g, i) => {
+      ensureSpace(7);
+      if (i % 2 === 1) { pdf.setFillColor(246, 243, 255); pdf.rect(M, y - 4, W - 2 * M, 6, "F"); }
+      pdf.setTextColor(30, 30, 30);
+      const d = new Date(g.date + "T12:00");
+      pdf.text(`${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}.`, colX.date + 1, y);
+      pdf.text(g.start || "–", colX.time + 1, y);
+      pdf.text(pdf.splitTextToSize(teamById(g.team)?.name || g.team || "", colX.opp - colX.team - 2)[0], colX.team + 1, y);
+      pdf.text(pdf.splitTextToSize(g.opponent || "–", colX.venue - colX.opp - 2)[0], colX.opp + 1, y);
+      pdf.text(pdf.splitTextToSize(g.venue || "", W - M - colX.venue - 2)[0], colX.venue + 1, y);
+      y += 6;
+    });
+  }
+
+  pdf.save(`Auswaertsspielplan-${year}-${String(month + 1).padStart(2, "0")}.pdf`);
+}
+
 async function exportWeekPDF(weekDays, entriesForDay, irrDays, extras = {}) {
   const { notes, maehplan, maehSignups, maehKw, lockForDayField, awayGamesForDay } = extras;
   let jsPDF;
@@ -482,10 +545,14 @@ export default function App() {
   const [moveTarget, setMoveTarget] = useState(null); // Belegung, die im Plan verschoben wird
 
   // Belegung im Plan verschieben (behält Status bei, ohne automatische Trainer-Nachricht)
-  const doMovePlan = (b, neu) => {
+  const doMovePlan = async (b, neu) => {
     const { id, ...rest } = b;
-    moveBooking(b.id, { ...rest, ...neu });
-    setMoveTarget(null);
+    try {
+      await moveBooking(b.id, { ...rest, ...neu });
+      setMoveTarget(null);
+    } catch (e) {
+      window.alert("Verschieben fehlgeschlagen: " + (e?.message || e) + "\n\nMöglicherweise fehlt dir die Berechtigung dafür.");
+    }
   };
 
   // Belegungen nach Tag indexieren
@@ -610,6 +677,7 @@ export default function App() {
         setCalMode={setCalMode}
         onPrint={() => window.print()}
         onPdf={() => exportMonthPDF(monthAnchor, entriesForDay, { p1: unionIrrigationDays(irrigation?.p1), p2: unionIrrigationDays(irrigation?.p2) }, { awayGamesForDay })}
+        onAwayPdf={() => exportAwayMonthPDF(monthAnchor, awayGames)}
         onWeekPdf={() => exportWeekPDF(days, entriesForDay, { p1: unionIrrigationDays(irrigation?.p1), p2: unionIrrigationDays(irrigation?.p2) }, { notes, maehplan, maehSignups, maehKw, lockForDayField, awayGamesForDay })}
         theme={theme}
         setTheme={setTheme}
@@ -844,7 +912,7 @@ export default function App() {
 }
 
 /* ---------------- Header ---------------- */
-function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf, onWeekPdf, theme, setTheme, maehplanOn }) {
+function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf, onWeekPdf, onAwayPdf, theme, setTheme, maehplanOn }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const teamOptions = (role === "trainer" && myTeams.length > 0)
     ? TEAMS.filter((t) => myTeams.includes(t.id))
@@ -884,6 +952,7 @@ function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, r
                     <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Monatsplan</div>
                     <button onClick={() => { close(); onPrint && onPrint(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>🖨 Drucken</button>
                     <button onClick={() => { close(); onPdf && onPdf(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>⬇ Als PDF speichern</button>
+                    <button onClick={() => { close(); onAwayPdf && onAwayPdf(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>🚌 Auswärtsspielplan als PDF</button>
                   </>
                 )}
 
@@ -1740,11 +1809,15 @@ function Chip({ entry, conflict, isAdmin, removeBooking, onMove }) {
   const zoneLabel = entry.field === "p2" ? (P2_SHORT[entry.zone] || entry.zone)
     : entry.field === "p3" ? (entry.zone === "h1" ? "H1" : "H2") : "";
   const canEdit = isAdmin && !entry.auto;
-  const del = () => {
+  const del = async () => {
     const d = new Date(entry.date + "T12:00");
     const ds = `${d.getDate()}.${d.getMonth() + 1}.`;
     if (window.confirm(`Belegung löschen?\n\n${t ? t.name : entry.team} · ${ds} · ${entry.start}–${entry.end}`)) {
-      removeBooking(entry.id);
+      try {
+        await removeBooking(entry.id);
+      } catch (e) {
+        window.alert("Löschen fehlgeschlagen: " + (e?.message || e) + "\n\nMöglicherweise fehlt dir die Berechtigung dafür.");
+      }
     }
   };
   const teamColor = t ? t.color : "#888888";
@@ -2279,7 +2352,11 @@ function ConflictOverview({ bookings, removeBooking, onMove }) {
                   <span style={{ flex: "1 1 240px", borderLeft: `3px solid ${teamById(bk.team)?.color || C.textSec}`, paddingLeft: 8 }}>{line(bk)}</span>
                   <span style={{ display: "flex", gap: 6 }}>
                     {onMove && <button style={S.navBtn} onClick={() => onMove(bk)}>Verschieben</button>}
-                    <button style={S.delBtn} onClick={() => { if (window.confirm(`Löschen?\n\n${line(bk)}`)) removeBooking(bk.id, bookings); }}>Löschen</button>
+                    <button style={S.delBtn} onClick={async () => {
+                      if (!window.confirm(`Löschen?\n\n${line(bk)}`)) return;
+                      try { await removeBooking(bk.id, bookings); }
+                      catch (e) { window.alert("Löschen fehlgeschlagen: " + (e?.message || e) + "\n\nMöglicherweise fehlt dir die Berechtigung dafür."); }
+                    }}>Löschen</button>
                   </span>
                 </div>
               ))}
@@ -2490,8 +2567,16 @@ function BookingManager({ bookings, removeBooking, removeSeries, onMove }) {
           </span>
           <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {onMove && <button style={S.navBtn} onClick={() => onMove(b)}>Verschieben</button>}
-            {b.seriesId && <button style={S.delBtn} onClick={() => { if (window.confirm("Die ganze Serie löschen (alle Termine)?")) removeSeries(b.seriesId, bookings); }}>Serie löschen</button>}
-            <button style={S.delBtn} onClick={() => { if (window.confirm(`Belegung am ${fmtDate(b.date)} löschen?`)) removeBooking(b.id); }}>Diesen Tag löschen</button>
+            {b.seriesId && <button style={S.delBtn} onClick={async () => {
+              if (!window.confirm("Die ganze Serie löschen (alle Termine)?")) return;
+              try { await removeSeries(b.seriesId, bookings); }
+              catch (e) { window.alert("Löschen fehlgeschlagen: " + (e?.message || e) + "\n\nMöglicherweise fehlt dir die Berechtigung dafür."); }
+            }}>Serie löschen</button>}
+            <button style={S.delBtn} onClick={async () => {
+              if (!window.confirm(`Belegung am ${fmtDate(b.date)} löschen?`)) return;
+              try { await removeBooking(b.id, bookings); }
+              catch (e) { window.alert("Löschen fehlgeschlagen: " + (e?.message || e) + "\n\nMöglicherweise fehlt dir die Berechtigung dafür."); }
+            }}>Diesen Tag löschen</button>
           </span>
         </div>
       ))}
@@ -3937,11 +4022,15 @@ function TrainDayApproval({ bookings, setBookingStatus, approveSeries, moveBooki
     return `${WEEKDAYS[(d.getDay() + 6) % 7]} ${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
   };
 
-  const reject = (b, label) => {
+  const reject = async (b, label) => {
     const reason = window.prompt(`Antrag ablehnen – kurze Nachricht an ${teamById(b.team)?.name} (optional):`, "");
     if (reason === null) return;
-    addMessage({ team: b.team, recipientUid: b.ownerUid || null, dir: "out", text: `Trainingstag ${label} wurde abgelehnt.${reason ? " " + reason : ""}` });
-    removeBooking(b.id);
+    try {
+      await removeBooking(b.id);
+      addMessage({ team: b.team, recipientUid: b.ownerUid || null, dir: "out", text: `Trainingstag ${label} wurde abgelehnt.${reason ? " " + reason : ""}` });
+    } catch (e) {
+      window.alert("Ablehnen fehlgeschlagen: " + (e?.message || e) + "\n\nMöglicherweise fehlt dir die Berechtigung dafür.");
+    }
   };
 
   const rejectSeries = (sid, list) => {
@@ -3954,10 +4043,14 @@ function TrainDayApproval({ bookings, setBookingStatus, approveSeries, moveBooki
 
   const move = (b) => setMoveTarget(b);
 
-  const doMove = (b, neu) => {
-    moveBooking(b.id, { ...neu, team: b.team, kind: "training", status: "frei" });
-    addMessage({ team: b.team, recipientUid: b.ownerUid || null, dir: "out", text: `${teamById(b.team)?.name} wurde verschoben auf ${fmtDate(neu.date)} ${neu.start}–${neu.end} (${fieldById(neu.field)?.name}, ${zoneText(neu.field, neu.zone)}), bitte prüfen.` });
-    setMoveTarget(null);
+  const doMove = async (b, neu) => {
+    try {
+      await moveBooking(b.id, { ...neu, team: b.team, kind: "training", status: "frei" });
+      addMessage({ team: b.team, recipientUid: b.ownerUid || null, dir: "out", text: `${teamById(b.team)?.name} wurde verschoben auf ${fmtDate(neu.date)} ${neu.start}–${neu.end} (${fieldById(neu.field)?.name}, ${zoneText(neu.field, neu.zone)}), bitte prüfen.` });
+      setMoveTarget(null);
+    } catch (e) {
+      window.alert("Verschieben fehlgeschlagen: " + (e?.message || e) + "\n\nMöglicherweise fehlt dir die Berechtigung dafür.");
+    }
   };
 
   const empty = singles.length === 0 && Object.keys(seriesMap).length === 0;
@@ -4024,7 +4117,10 @@ function TrainDayApproval({ bookings, setBookingStatus, approveSeries, moveBooki
           {stale.map((b) => (
             <div key={b.id} style={{ ...S.listRow, fontSize: 13, opacity: 0.8 }}>
               <span>{teamById(b.team)?.name} · {fmtDate(b.date)} · {b.start}–{b.end} · {fieldById(b.field)?.name}</span>
-              <button style={S.delBtn} onClick={() => removeBooking(b.id)}>Entfernen</button>
+              <button style={S.delBtn} onClick={async () => {
+                try { await removeBooking(b.id); }
+                catch (e) { window.alert("Entfernen fehlgeschlagen: " + (e?.message || e) + "\n\nMöglicherweise fehlt dir die Berechtigung dafür."); }
+              }}>Entfernen</button>
             </div>
           ))}
         </div>

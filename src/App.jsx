@@ -505,15 +505,15 @@ export default function App() {
   const { user, authReady, isLoggedIn, role, isVorstand, isPlatzwart, isTrainer, canEditIrrigation, myTeams, profile, loginEmail, resetPassword, registerEmail, logout, loginAdminPin, pinAdmin, changePin } = useAuth();
   const isAdmin = isPlatzwart; // Kompatibilität: bestehender Code nutzt isAdmin = Platzwart-Rechte
   const [showLogin, setShowLogin] = useState(false);
-  const { bookings, bookingsReady, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, importBookings } = useBookings();
+  const { bookings, bookingsReady, bookingsError, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, importBookings } = useBookings();
   const { awayGames, awayGamesReady, addAwayGame, removeAwayGame, importAwayGames } = useAwayGames();
   const awayGamesForDay = (d) => {
     const dk = dayKey(d);
     return awayGames.filter((g) => g.date === dk).sort((a, b) => (a.start || "").localeCompare(b.start || ""));
   };
-  const { locks, locksReady, addLock, removeLock } = useLocks();
-  const { notes, notesReady, setNote } = useNotes();
-  const { messages, messagesReady, addMessage, setMessageDone, removeMessage } = useMessages();
+  const { locks, locksReady, locksError, addLock, removeLock } = useLocks();
+  const { notes, notesReady, notesError, setNote } = useNotes();
+  const { messages, messagesReady, messagesError, addMessage, setMessageDone, removeMessage } = useMessages();
   const { users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser } = useUsers(isPlatzwart);
   const { irrigation, irrigationReady, saveIrrigation } = useIrrigation();
   const maehplanCfg = (irrigation && irrigation._maehplan) || {};
@@ -661,6 +661,7 @@ export default function App() {
   };
 
   const ready = bookingsReady && locksReady && messagesReady && notesReady && authReady;
+  const dataError = bookingsError || locksError || messagesError || notesError;
   if (!user || !ready)
     return (
       <div className="app-shell" style={S.shell}>
@@ -672,6 +673,13 @@ export default function App() {
 
   return (
     <div className="app-shell" style={S.shell}>
+      {dataError && (
+        <div style={{ background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", margin: "10px", fontSize: 13 }}>
+          ⚠️ Einige Daten konnten nicht geladen werden ({dataError}). Meist liegt das an den Firestore-Sicherheitsregeln –
+          bitte prüfen, ob sie korrekt veröffentlicht sind. Die App läuft trotzdem weiter, aber manche Bereiche
+          zeigen möglicherweise keine Daten an.
+        </div>
+      )}
       {moveTarget && <MoveDialogOverlay entry={moveTarget} onCancel={() => setMoveTarget(null)} onSave={doMovePlan} />}
       {showLogin && (
         <LoginOverlay

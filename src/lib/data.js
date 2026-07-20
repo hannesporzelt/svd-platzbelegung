@@ -6,6 +6,7 @@ import {
   query, where, getDocs,
 } from "firebase/firestore";
 import { db, auth } from "./firebase";
+import { onAuthStateChanged } from "firebase/auth";
 import { initializeApp as initMaehplan } from "firebase/app";
 import { getDatabase as getMaehplanDb, ref as maehRef, set as maehSet, remove as maehRemove } from "firebase/database";
 
@@ -59,6 +60,15 @@ function useCollection(name, enabled = true) {
   const [items, setItems] = useState([]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
+  // Firestore beendet einen onSnapshot-Lauscher endgültig, sobald er einmal
+  // einen Rechte-Fehler bekommt – er verbindet sich NICHT von selbst neu,
+  // auch wenn sich später (z. B. nach Ab-/Wieder-Anmelden) die Rechte ändern.
+  // Beim Abmelden wechselt kurz die anonyme Firebase-Identität; ohne diesen
+  // authUid-Trigger bliebe die rote Fehlermeldung deshalb für immer stehen,
+  // bis die Seite komplett neu geladen wird.
+  const [authUid, setAuthUid] = useState(auth.currentUser?.uid || null);
+  useEffect(() => onAuthStateChanged(auth, (u) => setAuthUid(u?.uid || null)), []);
+
   useEffect(() => {
     if (!enabled) { setItems([]); setReady(true); return; }
     const unsub = onSnapshot(
@@ -80,7 +90,7 @@ function useCollection(name, enabled = true) {
       }
     );
     return unsub;
-  }, [name, enabled]);
+  }, [name, enabled, authUid]);
   return { items, ready, error };
 }
 

@@ -49,9 +49,14 @@ const fieldFromLoc = (loc) => {
 };
 function teamsFromSummary(sum) {
   const first = (sum || "").split(",")[0];
-  const dash = first.indexOf("-");
-  if (dash < 0) return { home: first.trim(), guest: "" };
-  return { home: first.slice(0, dash).trim(), guest: first.slice(dash + 1).trim() };
+  // Nach " - " (mit Leerzeichen) trennen, nicht nach dem ersten "-" – sonst
+  // reißt ein Bindestrich im Vereinsnamen selbst (z. B. "JFG Main-Kreuzberg
+  // Kickers") die Heim-/Gastmannschaft an der falschen Stelle auseinander.
+  const dash = first.indexOf(" - ");
+  if (dash >= 0) return { home: first.slice(0, dash).trim(), guest: first.slice(dash + 3).trim() };
+  const bare = first.indexOf("-");
+  if (bare < 0) return { home: first.trim(), guest: "" };
+  return { home: first.slice(0, bare).trim(), guest: first.slice(bare + 1).trim() };
 }
 const addMin = (hhmm, mins) => {
   const [h, m] = (hhmm || "0:0").split(":").map(Number);

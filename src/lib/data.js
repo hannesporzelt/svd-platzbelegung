@@ -71,6 +71,13 @@ function useCollection(name, enabled = true) {
 
   useEffect(() => {
     if (!enabled) { setItems([]); setReady(true); return; }
+    // Während des kurzen Augenblicks beim Ab-/Wieder-Anmelden, in dem Firebase
+    // noch KEINE Identität hat (alte Sitzung beendet, neue anonyme Sitzung
+    // noch nicht fertig), lohnt sich kein neuer Verbindungsversuch – der würde
+    // sofort mit einem Rechte-Fehler scheitern. Einfach warten, bis wieder
+    // eine Identität da ist; die zuletzt geladenen Daten bleiben so lange
+    // unverändert sichtbar, statt kurz eine Fehlermeldung aufblitzen zu lassen.
+    if (!authUid) return;
     const unsub = onSnapshot(
       collection(db, name),
       (snap) => {

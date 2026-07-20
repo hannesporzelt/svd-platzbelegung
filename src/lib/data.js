@@ -58,19 +58,34 @@ const uid = () => auth.currentUser?.uid || null;
 function useCollection(name, enabled = true) {
   const [items, setItems] = useState([]);
   const [ready, setReady] = useState(false);
+  const [error, setError] = useState(null);
   useEffect(() => {
     if (!enabled) { setItems([]); setReady(true); return; }
-    const unsub = onSnapshot(collection(db, name), (snap) => {
-      setItems(snap.docs.map((d) => ({ ...d.data(), id: d.id })));
-      setReady(true);
-    });
+    const unsub = onSnapshot(
+      collection(db, name),
+      (snap) => {
+        setItems(snap.docs.map((d) => ({ ...d.data(), id: d.id })));
+        setReady(true);
+        setError(null);
+      },
+      (err) => {
+        // WICHTIG: ohne diesen Fehler-Handler bleibt "ready" bei einem
+        // Regel-/Rechteproblem für immer false und die ganze App hängt
+        // unsichtbar auf "Verbinde mit dem Belegungsplan…" fest, ohne dass
+        // irgendwo eine Fehlermeldung erscheint. Lieber mit leeren Daten
+        // weitermachen und den Fehler sichtbar machen.
+        console.error(`Firestore-Fehler bei "${name}":`, err);
+        setReady(true);
+        setError(err?.message || String(err));
+      }
+    );
     return unsub;
   }, [name, enabled]);
-  return { items, ready };
+  return { items, ready, error };
 }
 
 export function useBookings() {
-  const { items, ready } = useCollection("bookings");
+  const { items, ready, error } = useCollection("bookings");
   const contentId = (b) =>
     [b.date, b.field, b.zone, b.team, b.start, b.end, b.kind || "training"]
       .join("_")
@@ -80,6 +95,7 @@ export function useBookings() {
   return {
     bookings: items,
     bookingsReady: ready,
+    bookingsError: error,
     addBooking: (b) => {
       const withOwner = { ...b, ownerUid: b.ownerUid || uid() };
       const id = idFor(withOwner);
@@ -232,10 +248,11 @@ export function useTrainingDays() {
 }
 
 export function useLocks() {
-  const { items, ready } = useCollection("locks");
+  const { items, ready, error } = useCollection("locks");
   return {
     locks: items,
     locksReady: ready,
+    locksError: error,
     addLock: (l) => addDoc(collection(db, "locks"), l),
     removeLock: (id) => deleteDoc(doc(db, "locks", id)),
   };
@@ -244,12 +261,13 @@ export function useLocks() {
 // Tagesnotizen (z. B. "Platz 2 zu nass"). docId = Datum (YYYY-MM-DD).
 //   notes   { text, ts }   – sichtbar für alle, geschrieben vom Platzwart.
 export function useNotes() {
-  const { items, ready } = useCollection("notes");
+  const { items, ready, error } = useCollection("notes");
   const map = {};
   items.forEach((it) => { map[it.id] = it; });
   return {
     notes: map,
     notesReady: ready,
+    notesError: error,
     // Notiz setzen oder (bei leerem Text) löschen
     setNote: (dateKey, text) => {
       const t = (text || "").trim();
@@ -292,10 +310,11 @@ export function useIrrigation() {
 }
 
 export function useMessages() {
-  const { items, ready } = useCollection("messages");
+  const { items, ready, error } = useCollection("messages");
   return {
     messages: items,
     messagesReady: ready,
+    messagesError: error,
     addMessage: (m) => addDoc(collection(db, "messages"), { ...m, senderUid: uid(), done: false, ts: Date.now() }),
     setMessageDone: (id, done) => updateDoc(doc(db, "messages", id), { done }),
     removeMessage: (id) => deleteDoc(doc(db, "messages", id)),

@@ -3627,6 +3627,11 @@ function UserManager({ users, saveUser, setUserRole, setUserTeams, setUserRights
   const toggleTeam = (tid) => setDraftTeams((d) => d.includes(tid) ? d.filter((x) => x !== tid) : [...d, tid]);
   const saveTeams = (u) => { setUserTeams(u.id, draftTeams); setEditId(null); };
 
+  const [editNameId, setEditNameId] = useState(null);
+  const [draftName, setDraftName] = useState("");
+  const startEditName = (u) => { setEditNameId(u.id); setDraftName(u.name || ""); };
+  const saveName = (u) => { saveUser(u.id, { name: draftName.trim() }); setEditNameId(null); };
+
   const rightOn = (u, key) => !u.rights || typeof u.rights !== "object" ? true : u.rights[key] === true;
   const toggleRight = (u, key) => {
     const base = (u.rights && typeof u.rights === "object") ? u.rights : { irrigation: true, locks: true, messages: true, notes: true };
@@ -3659,7 +3664,19 @@ function UserManager({ users, saveUser, setUserRole, setUserTeams, setUserRights
           <div key={u.id} style={{ ...S.wishRow, flexDirection: "column", alignItems: "stretch", gap: 6, ...(isNew ? { background: "#fff7ed" } : {}) }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
               <div>
-                <b>{u.name || "(ohne Name)"}</b>
+                {editNameId === u.id ? (
+                  <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                    <input type="text" value={draftName} onChange={(e) => setDraftName(e.target.value)}
+                      placeholder="Name" autoFocus
+                      style={{ ...S.select, width: "auto", minWidth: 140, padding: "3px 6px", fontSize: 13 }} />
+                    <button style={{ ...S.navBtn, padding: "3px 8px", fontSize: 12 }} onClick={() => saveName(u)}>Speichern</button>
+                    <button style={{ ...S.navBtn, padding: "3px 8px", fontSize: 12 }} onClick={() => setEditNameId(null)}>Abbrechen</button>
+                  </span>
+                ) : (
+                  <span onClick={() => startEditName(u)} style={{ cursor: "pointer" }} title="Namen bearbeiten">
+                    <b>{u.name || "(ohne Name)"}</b> <span style={{ fontSize: 11, color: C.textSec }}>✏️</span>
+                  </span>
+                )}
                 <span style={{ marginLeft: 8, fontSize: 12, padding: "1px 8px", borderRadius: 10, background: roleBg, color: "#334" }}>
                   {roleLabel}
                 </span>

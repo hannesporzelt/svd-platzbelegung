@@ -206,6 +206,10 @@ export function useBookings() {
       allBookings.filter((b) => b.seriesId === seriesId).forEach((b) => batch.delete(doc(db, "bookings", b.id)));
       await batch.commit();
     },
+    // Stellt eine zuvor gelöschte Buchung mit exakt derselben ID wieder her
+    // (wichtig für BFV-IDs, Serien-Zusammenhänge, matchGroup-Verweise) – für
+    // die "Rückgängig"-Funktion nach dem Löschen.
+    restoreBooking: (id, data) => setDoc(doc(db, "bookings", id), data),
   };
 }
 
@@ -223,6 +227,8 @@ export function useAwayGames() {
       return setDoc(doc(db, "awayGames", idFor(withOwner)), withOwner);
     },
     removeAwayGame: (id) => deleteDoc(doc(db, "awayGames", id)),
+    // Für die "Rückgängig"-Funktion nach dem Löschen – exakt dieselbe ID.
+    restoreAwayGame: (id, data) => setDoc(doc(db, "awayGames", id), data),
     // Importiert BFV-Auswärtsspiele: Doc-ID = bfv-<UID> (wie bei Heimspielen),
     // ein erneuter Import überschreibt/aktualisiert dasselbe Spiel statt Dubletten anzulegen.
     importAwayGames: async (games) => {

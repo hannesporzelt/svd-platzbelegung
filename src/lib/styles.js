@@ -13,6 +13,18 @@ export const C = {
   brandDark: "var(--c-brand-dark, #0a4f2d)",
   ok: "var(--c-ok, #0f6e56)",
   danger: "var(--c-danger, #a32d2d)",
+  // Auswärtsspiele – bisher an vielen Stellen einzeln als Hex-Wert dupliziert
+  // (Kalender-Badges, Tages-Rahmen, PDF-Export). Jetzt ein Satz Tokens.
+  away: "var(--c-away, #7c3aed)",
+  awayBg: "var(--c-away-bg, #ede7fa)",
+  awayText: "var(--c-away-text, #4c1d95)",
+  // Konflikte/Warnungen (Doppelbelegung, Regel-Fehler)
+  warn: "var(--c-warn, #991b1b)",
+  warnBg: "var(--c-warn-bg, #fef2f2)",
+  warnBorder: "var(--c-warn-border, #fecaca)",
+  // Offene Anträge / wartend
+  pending: "var(--c-pending, #c2410c)",
+  pendingBg: "var(--c-pending-bg, #fff7ed)",
 };
 
 export const S = {

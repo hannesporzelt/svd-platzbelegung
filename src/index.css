@@ -56,6 +56,14 @@ input, select { font-family: inherit; }
   --c-badge-bg: #2a2e33;
   --c-danger-bg: #3a2526;
   --c-ok-bg: #1d352e;
+  --c-away: #a78bfa;
+  --c-away-bg: #2e2445;
+  --c-away-text: #ddd6fe;
+  --c-warn: #f3a5a5;
+  --c-warn-bg: #3a2526;
+  --c-warn-border: #5c3333;
+  --c-pending: #fdba74;
+  --c-pending-bg: #3a2a1a;
 }
 :root[data-theme="dark"] body { background: #15171a; color: #e8e6e1; }
 

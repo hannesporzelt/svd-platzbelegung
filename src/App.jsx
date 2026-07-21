@@ -505,13 +505,70 @@ export default function App() {
   const { user, authReady, isLoggedIn, role, isVorstand, isPlatzwart, isTrainer, canEditIrrigation, myTeams, profile, loginEmail, resetPassword, registerEmail, logout, loginAdminPin, pinAdmin, changePin } = useAuth();
   const isAdmin = isPlatzwart; // Kompatibilität: bestehender Code nutzt isAdmin = Platzwart-Rechte
   const [showLogin, setShowLogin] = useState(false);
-  const { bookings, bookingsReady, bookingsError, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, importBookings } = useBookings();
-  const { awayGames, awayGamesReady, addAwayGame, removeAwayGame, importAwayGames } = useAwayGames();
+  const { bookings, bookingsReady, bookingsError, addBooking, addBookingSeries, setBookingStatus, approveSeries, moveBooking, removeBooking, removeSeries, restoreBooking, importBookings } = useBookings();
+  const { awayGames, awayGamesReady, addAwayGame, removeAwayGame, restoreAwayGame, importAwayGames } = useAwayGames();
   const awayGamesForDay = (d) => {
     const dk = dayKey(d);
     return awayGames.filter((g) => g.date === dk).sort((a, b) => (a.start || "").localeCompare(b.start || ""));
   };
   const { locks, locksReady, locksError, addLock, removeLock } = useLocks();
+
+  // ── Rückgängig-Funktion nach dem Löschen ────────────────────────────
+  // Zeigt 7 Sekunden lang eine Einblendung mit "Rückgängig"-Button. Die
+  // eigentlichen Lösch-Funktionen (removeBooking usw.) bleiben unverändert –
+  // hier werden nur "umhüllte" Varianten gebaut, die VOR dem Löschen die
+  // Daten sichern, damit sie bei Bedarf 1:1 (gleiche ID!) wiederhergestellt
+  // werden können.
+  const undoTimerRef = useRef(null);
+  const [undoState, setUndoState] = useState(null); // { message, onUndo }
+  const showUndo = (message, onUndo) => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = setTimeout(() => setUndoState(null), 7000);
+    setUndoState({ message, onUndo });
+  };
+  const doUndo = async () => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    const st = undoState;
+    setUndoState(null);
+    if (st?.onUndo) {
+      try { await st.onUndo(); }
+      catch (e) { window.alert("Rückgängig machen fehlgeschlagen: " + (e?.message || e)); }
+    }
+  };
+
+  const removeBookingWithUndo = async (id, allBookings) => {
+    const src = allBookings || bookings;
+    const original = src.find((b) => b.id === id);
+    await removeBooking(id, allBookings);
+    if (original) {
+      const { id: _id, ...data } = original;
+      const label = original.kind === "match" ? "Heimspiel" : original.kind === "turnier" ? "Turnier" : "Belegung";
+      showUndo(`${label} gelöscht (${teamById(original.team)?.name || original.team}, ${original.date})`, () => restoreBooking(id, data));
+    }
+  };
+
+  const removeSeriesWithUndo = async (seriesId, allBookings) => {
+    const src = allBookings || bookings;
+    const originals = src.filter((b) => b.seriesId === seriesId);
+    await removeSeries(seriesId, allBookings);
+    if (originals.length > 0) {
+      showUndo(`Serie gelöscht (${originals.length} Termine)`, async () => {
+        for (const o of originals) {
+          const { id: oid, ...data } = o;
+          await restoreBooking(oid, data);
+        }
+      });
+    }
+  };
+
+  const removeAwayGameWithUndo = async (id) => {
+    const original = awayGames.find((g) => g.id === id);
+    await removeAwayGame(id);
+    if (original) {
+      const { id: _id, ...data } = original;
+      showUndo(`Auswärtsspiel gelöscht (bei ${original.opponent || "?"})`, () => restoreAwayGame(id, data));
+    }
+  };
   const { notes, notesReady, notesError, setNote } = useNotes();
   const { messages, messagesReady, messagesError, addMessage, setMessageDone, removeMessage } = useMessages();
   const { users, saveUser, setUserRole, setUserTeams, setUserRights, removeUser } = useUsers(isPlatzwart);
@@ -674,13 +731,26 @@ export default function App() {
   return (
     <div className="app-shell" style={S.shell}>
       {dataError && (
-        <div style={{ background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", margin: "10px", fontSize: 13 }}>
+        <div style={{ background: C.warnBg, color: C.warn, border: `1px solid ${C.warnBorder}`, borderRadius: 8, padding: "10px 14px", margin: "10px", fontSize: 13 }}>
           ⚠️ Einige Daten konnten nicht geladen werden ({dataError}). Meist liegt das an den Firestore-Sicherheitsregeln –
           bitte prüfen, ob sie korrekt veröffentlicht sind. Die App läuft trotzdem weiter, aber manche Bereiche
           zeigen möglicherweise keine Daten an.
         </div>
       )}
       {moveTarget && <MoveDialogOverlay entry={moveTarget} onCancel={() => setMoveTarget(null)} onSave={doMovePlan} />}
+      {undoState && (
+        <div className="no-print" style={{
+          position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)",
+          background: "#1f2937", color: "#fff", padding: "10px 16px", borderRadius: 10,
+          display: "flex", gap: 14, alignItems: "center", zIndex: 300,
+          boxShadow: "0 6px 24px rgba(0,0,0,0.35)", maxWidth: "92vw",
+        }}>
+          <span style={{ fontSize: 13 }}>{undoState.message}</span>
+          <button onClick={doUndo} style={{ background: "transparent", border: "none", color: "#93c5fd", fontWeight: 700, cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" }}>
+            Rückgängig
+          </button>
+        </div>
+      )}
       {showLogin && (
         <LoginOverlay
           onClose={() => setShowLogin(false)}
@@ -780,7 +850,7 @@ export default function App() {
             activeField={activeField}
             setActiveField={setActiveField}
             isAdmin={isAdmin}
-            removeBooking={removeBooking}
+            removeBooking={removeBookingWithUndo}
             onMove={setMoveTarget}
             notes={notes}
             setNote={setNote}
@@ -815,7 +885,7 @@ export default function App() {
           awayGamesForDay={awayGamesForDay}
           lockForDayField={lockForDayField}
           isAdmin={isAdmin}
-          removeBooking={removeBooking}
+          removeBooking={removeBookingWithUndo}
           notes={notes}
           setNote={setNote}
           irrigation={irrigation}
@@ -844,7 +914,7 @@ export default function App() {
           setBookingStatus={setBookingStatus}
           approveSeries={approveSeries}
           addMessage={addMessage}
-          removeBooking={removeBooking}
+          removeBooking={removeBookingWithUndo}
           irrigation={irrigation}
           profile={profile}
         />
@@ -861,11 +931,11 @@ export default function App() {
           setBookingStatus={setBookingStatus}
           approveSeries={approveSeries}
           moveBooking={moveBooking}
-          removeBooking={removeBooking}
-          removeSeries={removeSeries}
+          removeBooking={removeBookingWithUndo}
+          removeSeries={removeSeriesWithUndo}
           awayGames={awayGames}
           addAwayGame={addAwayGame}
-          removeAwayGame={removeAwayGame}
+          removeAwayGame={removeAwayGameWithUndo}
           locks={locks}
           addLock={addLock}
           removeLock={removeLock}
@@ -1634,7 +1704,7 @@ function WeekGrid({ days, entriesForDay, awayGamesForDay, lockForDayField, activ
                 <span style={{ color: C.textSec, fontSize: 12 }}>{d.getDate()}.{d.getMonth() + 1}.</span>
               </div>
               {awayGamesForDay && awayGamesForDay(d).map((g) => (
-                <div key={g.id} style={{ fontSize: 11, color: "#4c1d95", background: "#ddd6fe", border: "1.5px solid #7c3aed", borderRadius: 5, padding: "3px 5px", marginBottom: 4, fontWeight: 700, overflowWrap: "anywhere" }}
+                <div key={g.id} style={{ fontSize: 11, color: C.awayText, background: C.awayBg, border: `1.5px solid ${C.away}`, borderRadius: 5, padding: "3px 5px", marginBottom: 4, fontWeight: 700, overflowWrap: "anywhere" }}
                   title={g.venue ? `Ort: ${g.venue}` : undefined}>
                   🚌 {g.start} {teamById(g.team)?.name || g.team} bei {g.opponent}
                 </div>
@@ -2102,7 +2172,7 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, awayGamesForDay
         </div>
       )}
       {meta.away && meta.away.length > 0 && meta.away.map((g) => (
-        <div key={g.id} style={{ fontSize: size + 0.5, color: "#4c1d95", background: "#ddd6fe", border: "1px solid #7c3aed", borderRadius: 4, padding: "1.5px 3px", marginBottom: 2, lineHeight: 1.25, fontWeight: 700, overflowWrap: "anywhere" }}
+        <div key={g.id} style={{ fontSize: size + 0.5, color: C.awayText, background: C.awayBg, border: `1px solid ${C.away}`, borderRadius: 4, padding: "1.5px 3px", marginBottom: 2, lineHeight: 1.25, fontWeight: 700, overflowWrap: "anywhere" }}
           title={g.venue ? `Ort: ${g.venue}` : undefined}>
           🚌 {g.start} {teamById(g.team)?.name || g.team} bei {g.opponent}
         </div>
@@ -2162,8 +2232,8 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, awayGamesForDay
             }
             return (
               <div key={dayKey(d)} ref={today ? todayRef : undefined}
-                style={{ border: meta.away.length > 0 ? "1.5px solid #7c3aed" : `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", marginBottom: 6,
-                  background: meta.away.length > 0 ? "#f5f3ff" : (today ? "#eef7f0" : C.surface) }}>
+                style={{ border: meta.away.length > 0 ? `1.5px solid ${C.away}` : `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", marginBottom: 6,
+                  background: meta.away.length > 0 ? C.awayBg : (today ? "#eef7f0" : C.surface) }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
                   <span style={{ fontSize: 15, fontWeight: 700, color: today ? C.brand : C.ink }}>{d.getDate()}.</span>
                   <span style={{ fontSize: 12, color: C.textSec }}>{wdLong}{today ? " · heute" : ""}</span>
@@ -2186,8 +2256,8 @@ function MonthView({ monthAnchor, setMonthAnchor, entriesForDay, awayGamesForDay
             const hasAway = meta.away.length > 0;
             return (
               <div key={dayKey(d)} style={{
-                border: hasAway ? "1.5px solid #7c3aed" : `1px solid ${C.border}`, borderRadius: 8, minHeight: 92, padding: 5,
-                background: hasAway ? "#f5f3ff" : (inMonth ? (today ? "#eef7f0" : C.surface) : "#f5f4ef"),
+                border: hasAway ? `1.5px solid ${C.away}` : `1px solid ${C.border}`, borderRadius: 8, minHeight: 92, padding: 5,
+                background: hasAway ? C.awayBg : (inMonth ? (today ? "#eef7f0" : C.surface) : "#f5f4ef"),
                 opacity: inMonth ? 1 : 0.55,
               }}>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3, color: today ? C.brand : C.ink }}>{d.getDate()}</div>
@@ -2922,7 +2992,7 @@ function IrrigationPanel({ irrigation, saveIrrigation, canEdit, bookings }) {
       </p>
 
       {hasOverlap && (
-        <div style={{ ...S.warnBanner, background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", display: "block", marginBottom: 12 }}>
+        <div style={{ ...S.warnBanner, background: C.warnBg, color: C.warn, border: `1px solid ${C.warnBorder}`, display: "block", marginBottom: 12 }}>
           ⚠️ <b>Pumpen-Konflikt:</b> An folgenden Tagen überschneiden sich Stationen:{" "}
           {Object.keys(overlapsByDay).join(", ")}. Bitte Startzeiten anpassen. Speichern ist gesperrt.
         </div>
@@ -3300,6 +3370,9 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
         }
         setAutoMsg(parts.length > 0 ? `${parts.join(" und ")} automatisch abgeglichen.` : null);
         setTimeout(() => setAutoMsg(null), 4000);
+        // Zeitpunkt dauerhaft speichern (nicht nur die flüchtige Meldung oben) –
+        // damit man auch nach einem Neuladen noch sieht, wann zuletzt abgeglichen wurde.
+        saveIrrigation("_calendars", { list: cals, lastSyncedAt: Date.now() }).catch(() => {});
       } catch {
         setAutoMsg(null);
       }
@@ -3372,6 +3445,7 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
         parts.push(`${n} Auswärtsspiel(e)`);
       }
       setMsg(parts.length > 0 ? `${parts.join(" und ")} in den Plan eingetragen/aktualisiert.` : "Nichts zu importieren.");
+      saveIrrigation("_calendars", { list: cals, lastSyncedAt: Date.now() }).catch(() => {});
     } catch (e) {
       setMsg("Eintragen fehlgeschlagen: " + (e.message || ""));
     } finally {
@@ -3380,12 +3454,18 @@ function CalendarImport({ irrigation, saveIrrigation, canEdit, importBookings, b
   };
 
   return (
-    <div style={{ ...S.card, marginTop: 14, background: "#f5f3ff", border: "1px solid #ddd6fe" }}>
+    <div style={{ ...S.card, marginTop: 14, background: C.awayBg, border: `1px solid ${C.away}` }}>
       <h3 style={{ margin: "0 0 6px" }}>📅 Spielplan-Kalender (BFV)</h3>
       <p style={{ fontSize: 12, color: C.textSec, marginTop: 0 }}>
         BFV-Kalender-Links hinterlegen (pro Mannschaft einer). Beim Öffnen dieses Bereichs werden
         Heim- UND Auswärtsspiele automatisch abgeglichen und eingetragen. Manuell geht es jederzeit über die Knöpfe unten.
         Auswärtsspiele belegen keinen Platz und werden rein informativ im Kalender angezeigt.
+      </p>
+      <p style={{ fontSize: 12, color: C.textSec, marginTop: 0, marginBottom: 10 }}>
+        🕐 Zuletzt abgeglichen:{" "}
+        {irrigation?._calendars?.lastSyncedAt
+          ? new Date(irrigation._calendars.lastSyncedAt).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " Uhr"
+          : "noch nie"}
       </p>
       {autoMsg && (
         <div style={{ ...S.warnBanner, background: "#eff6ff", color: "#1e40af", border: "1px solid #bfdbfe", display: "block", marginBottom: 10 }}>
@@ -4434,7 +4514,7 @@ function FreeSlotFinder({ bookings }) {
       )}
 
       {!rangeInvalid && dayResults.length === 0 && (
-        <div style={{ ...S.warnBanner, background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", display: "block" }}>
+        <div style={{ ...S.warnBanner, background: C.warnBg, color: C.warn, border: `1px solid ${C.warnBorder}`, display: "block" }}>
           Keine freien Fenster von mindestens {minLen} Minuten im gewählten Zeitraum.
         </div>
       )}

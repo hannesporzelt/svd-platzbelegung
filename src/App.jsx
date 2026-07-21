@@ -712,6 +712,7 @@ export default function App() {
         onPrint={() => window.print()}
         onPdf={() => exportMonthPDF(monthAnchor, entriesForDay, { p1: unionIrrigationDays(irrigation?.p1), p2: unionIrrigationDays(irrigation?.p2) }, { awayGamesForDay })}
         onAwayPdf={() => exportAwayMonthPDF(monthAnchor, awayGames)}
+        onOpenTeamListPdf={() => { setAdminTab("team_liste"); setView("admin"); }}
         onWeekPdf={() => exportWeekPDF(days, entriesForDay, { p1: unionIrrigationDays(irrigation?.p1), p2: unionIrrigationDays(irrigation?.p2) }, { notes, maehplan, maehSignups, maehKw, lockForDayField, awayGamesForDay })}
         theme={theme}
         setTheme={setTheme}
@@ -947,7 +948,7 @@ export default function App() {
 }
 
 /* ---------------- Header ---------------- */
-function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf, onWeekPdf, onAwayPdf, theme, setTheme, maehplanOn }) {
+function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, role, myTeams, profile, onLoginClick, logoutAdmin, trainerTeam, setTrainerTeam, notices, requestCount, calMode, setCalMode, onPrint, onPdf, onWeekPdf, onAwayPdf, onOpenTeamListPdf, theme, setTheme, maehplanOn }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const teamOptions = (role === "trainer" && myTeams.length > 0)
     ? TEAMS.filter((t) => myTeams.includes(t.id))
@@ -984,19 +985,26 @@ function Header({ view, setView, isAdmin, isVorstand, isPlatzwart, isLoggedIn, r
 
                 {calMode === "monat" && (
                   <>
-                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Monatsplan</div>
-                    <button onClick={() => { close(); onPrint && onPrint(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>🖨 Drucken</button>
-                    <button onClick={() => { close(); onPdf && onPdf(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>⬇ Als PDF speichern</button>
-                    <button onClick={() => { close(); onAwayPdf && onAwayPdf(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>🚌 Auswärtsspielplan als PDF</button>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Diese Ansicht</div>
+                    <button onClick={() => { close(); onPrint && onPrint(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>🖨 Monatsplan drucken</button>
+                  </>
+                )}
+                {calMode === "woche" && (
+                  <>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Diese Ansicht</div>
+                    <button onClick={() => { close(); onPrint && onPrint(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>🖨 Wochenplan drucken</button>
                   </>
                 )}
 
-                {calMode === "woche" && (
-                  <>
-                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Wochenplan</div>
-                    <button onClick={() => { close(); onPrint && onPrint(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>🖨 Drucken</button>
-                    <button onClick={() => { close(); onWeekPdf && onWeekPdf(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>⬇ Woche als PDF</button>
-                  </>
+                {/* Alle PDF-Exporte gebündelt, unabhängig von der gerade sichtbaren Ansicht –
+                    kein Umschalten zwischen Woche/Monat mehr nötig, nur um an den jeweils
+                    anderen Export zu kommen. */}
+                <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Ausdrucke</div>
+                <button onClick={() => { close(); onWeekPdf && onWeekPdf(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>⬇ Wochenplan als PDF</button>
+                <button onClick={() => { close(); onPdf && onPdf(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>⬇ Monatsplan als PDF</button>
+                <button onClick={() => { close(); onAwayPdf && onAwayPdf(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>🚌 Auswärtsspielplan als PDF</button>
+                {isPlatzwart && onOpenTeamListPdf && (
+                  <button onClick={() => { close(); onOpenTeamListPdf(); }} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.ink, cursor: "pointer", fontSize: 14, borderRadius: 7, padding: "8px 10px" }}>📄 Mannschaft: Liste als PDF…</button>
                 )}
 
                 <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", color: C.textTer, padding: "8px 8px 2px" }}>Rolle</div>
@@ -2266,8 +2274,11 @@ function AdminPanel({ initialTab, days, bookings, bookingsByDay, addBooking, add
   })();
   const badgeFor = (k) => k === "trainingstage" ? pending : k === "nachrichten" ? openMsg : k === "konflikte" ? conflictDayCount : 0;
 
-  const choose = (k) => { setTab(k); setOpenGroup(groupOfTab(k)); setMenuOpen(false); };
+  const choose = (k) => { setTab(k); setOpenGroup(groupOfTab(k)); setMenuOpen(false); setTabSearch(""); };
   const openMenu = () => { setOpenGroup(groupOfTab(tab)); setMenuOpen((o) => !o); };
+  const [tabSearch, setTabSearch] = useState("");
+  const searchActive = tabSearch.trim().length > 0;
+  const matchesSearch = (label) => label.toLowerCase().includes(tabSearch.trim().toLowerCase());
 
   return (
     <div style={{ ...S.card, marginTop: "1rem" }}>
@@ -2281,22 +2292,33 @@ function AdminPanel({ initialTab, days, bookings, bookingsByDay, addBooking, add
         {menuOpen && (
           <>
             <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-            <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 8px 28px rgba(0,0,0,0.16)", padding: 8, maxHeight: 380, overflowY: "auto" }}>
+            <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 8px 28px rgba(0,0,0,0.16)", padding: 8, maxHeight: 420, overflowY: "auto" }}>
+              <input
+                type="text"
+                value={tabSearch}
+                onChange={(e) => setTabSearch(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                placeholder="🔍 Bereich suchen…"
+                autoFocus
+                style={{ ...S.select, width: "100%", marginBottom: 6 }}
+              />
               {menu.map((grp) => {
-                const expanded = openGroup === grp.group;
+                const visibleItems = searchActive ? grp.items.filter(([, l]) => matchesSearch(l)) : grp.items;
+                if (searchActive && visibleItems.length === 0) return null;
+                const expanded = searchActive ? true : openGroup === grp.group;
                 const groupBadge = grp.items.reduce((sum, [k]) => sum + (badgeFor(k) || 0), 0);
                 return (
                   <div key={grp.group} style={{ marginBottom: 4 }}>
                     <button
-                      onClick={() => setOpenGroup(expanded ? null : grp.group)}
-                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.textSec, cursor: "pointer", fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", padding: "6px 8px", fontWeight: 600 }}>
+                      onClick={() => !searchActive && setOpenGroup(expanded ? null : grp.group)}
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", textAlign: "left", border: "none", background: "transparent", color: C.textSec, cursor: searchActive ? "default" : "pointer", fontSize: 11, textTransform: "uppercase", letterSpacing: ".4px", padding: "6px 8px", fontWeight: 600 }}>
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         {grp.group}
                         {!expanded && groupBadge > 0 && <span style={{ ...S.badge }}>{groupBadge}</span>}
                       </span>
-                      <span style={{ fontSize: 10 }}>{expanded ? "▲" : "▼"}</span>
+                      {!searchActive && <span style={{ fontSize: 10 }}>{expanded ? "▲" : "▼"}</span>}
                     </button>
-                    {expanded && grp.items.map(([k, l]) => {
+                    {expanded && visibleItems.map(([k, l]) => {
                       const b = badgeFor(k);
                       const active = tab === k;
                       return (
@@ -2310,6 +2332,9 @@ function AdminPanel({ initialTab, days, bookings, bookingsByDay, addBooking, add
                   </div>
                 );
               })}
+              {searchActive && menu.every((grp) => grp.items.filter(([, l]) => matchesSearch(l)).length === 0) && (
+                <p style={{ fontSize: 13, color: C.textSec, padding: "6px 8px" }}>Nichts gefunden.</p>
+              )}
             </div>
           </>
         )}
